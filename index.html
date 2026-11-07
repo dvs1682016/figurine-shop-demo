@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>蕭大手作公仔店｜V1.02</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.6 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 68rem); margin: 2rem auto; }
+    h1 { font-size: clamp(1.8rem, 5vw, 3rem); margin: 0; }
+    header p { margin: 0 0 1.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem; }
+    article { background: #fff; border: 1px solid #eadfd4; border-radius: 1rem; overflow: hidden; }
+    figure { margin: 0; aspect-ratio: 4 / 3; background: #eee7f7; display: grid; place-items: center; }
+    figure img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+    .details { padding: 1rem; }
+    h2, .details p { margin: 0 0 .3rem; }
+    .price { font-size: 1.35rem; font-weight: 750; color: #592d8a; }
+    button, input { font: inherit; padding: .45rem .7rem; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; }
+    dialog { width: min(92%, 30rem); max-height: 90vh; border: 1px solid #eadfd4; border-radius: 1rem; padding: 1.25rem; }
+    dialog::backdrop { background: #29223d99; }
+    form label { display: grid; gap: .2rem; margin: .5rem 0; }
+    .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+    #receipt { overflow-wrap: anywhere; }
+    footer { margin-top: 2rem; font-size: .875rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>蕭大手作公仔店</h1>
+      <p>手作公仔 · 現貨商品</p>
+    </header>
+    <p id="status" role="status"></p>
+    <section id="products" class="grid" aria-label="商品清單"></section>
+    <p id="receipt" role="status"></p>
+    <dialog id="checkout" aria-labelledby="checkout-title">
+      <form id="order-form">
+        <h2 id="checkout-title">填寫訂單</h2>
+        <p id="selected-product"></p>
+        <label>數量<input name="quantity" type="number" min="1" max="99" step="1" required></label>
+        <label>收件人<input name="customer" maxlength="60" autocomplete="shipping name" required></label>
+        <label>手機（09 開頭，共 10 碼）<input name="phone" type="tel" inputmode="numeric" pattern="09[0-9]{8}" maxlength="10" autocomplete="shipping tel" required></label>
+        <label>收件地址<input name="address" maxlength="200" autocomplete="shipping street-address" required></label>
+        <p id="estimate"></p>
+        <p id="checkout-message" role="status"></p>
+        <div class="actions">
+          <button id="submit-order" type="submit">送出測試訂單</button>
+          <button id="close-checkout" type="button">返回商品頁</button>
+        </div>
+      </form>
+    </dialog>
+    <footer>LINE 公仔銷售平台 V1.02 · 教學下單試作</footer>
+  </main>
+  <script>
+    // LINE 公仔銷售平台 V1.02
+    const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
+    const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
+    const status = document.querySelector('#status');
+    const products = document.querySelector('#products');
+    const checkout = document.querySelector('#checkout');
+    const orderForm = document.querySelector('#order-form');
+    const quantityInput = orderForm.elements.namedItem('quantity');
+    const checkoutMessage = document.querySelector('#checkout-message');
+    const submitOrder = document.querySelector('#submit-order');
+    const closeCheckout = document.querySelector('#close-checkout');
+    const receipt = document.querySelector('#receipt');
+    const shippingFee = 60;
+    let selectedProduct;
+    let pendingOrder;
+    let submitting = false;
+    const currency = new Intl.NumberFormat('zh-TW', {
+      style: 'currency', currency: 'TWD', maximumFractionDigits: 0
+    });
+
+    function addText(parent, tag, value, className = '') {
+      const element = document.createElement(tag);
+      element.className = className;
+      element.textContent = value;
+      parent.append(element);
+    }
+
+    function makeCard(product) {
+      const card = document.createElement('article');
+      const photo = document.createElement('figure');
+      const image = document.createElement('img');
+      image.alt = product.name;
+      image.src = IMAGE_BASE + encodeURIComponent(product.image_filename);
+      image.addEventListener('error', () => {
+        photo.replaceChildren();
+        addText(photo, 'span', '照片暫時無法顯示');
+      }, { once: true });
+      photo.append(image);
+      const details = document.createElement('div');
+      details.className = 'details';
+      addText(details, 'h2', product.name);
+      addText(details, 'p', currency.format(product.price_ntd), 'price');
+      addText(details, 'p', product.stock > 0 ? '現貨 ' + product.stock + ' 件' : '已售完');
+      const buy = document.createElement('button');
+      buy.type = 'button';
+      buy.textContent = product.stock > 0 ? '購買這款' : '已售完';
+      buy.disabled = product.stock <= 0;
+      buy.addEventListener('click', () => openCheckout(product));
+      details.append(buy);
+      card.append(photo, details);
+      return card;
+    }
+
+    async function loadProducts() {
+      if (!SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_')) {
+        status.textContent = '請先在 index.html 填入本專案的 Supabase Publishable key。';
+        return;
+      }
+
+      status.textContent = '正在讀取商品…';
+      const url = new URL('/rest/v1/products', SUPABASE_URL);
+      url.searchParams.set('select', 'sku,name,price_ntd,stock,image_filename');
+      url.searchParams.set('order', 'sku.asc');
+
+      try {
+        const response = await fetch(url, { headers: { apikey: SUPABASE_PUBLISHABLE_KEY } });
+        if (!response.ok) {
+          status.textContent = '商品讀取失敗（HTTP ' + response.status + '）。請確認金鑰與第三課 SQL。';
+          return;
+        }
+        const catalog = await response.json();
+        products.replaceChildren(...catalog.map(makeCard));
+        status.textContent = catalog.length ? '' : '目前沒有上架商品。';
+      } catch {
+        status.textContent = '商品讀取失敗。請確認網路連線後重新整理。';
+      }
+    }
+
+    function updateEstimate() {
+      document.querySelector('#estimate').textContent = quantityInput.validity.valid
+        ? '含運費 ' + currency.format(shippingFee) + '，合計 ' +
+          currency.format(selectedProduct.price_ntd * quantityInput.valueAsNumber + shippingFee)
+        : '請輸入可購買的數量。';
+    }
+
+    function setFieldsLocked(locked) {
+      for (const input of orderForm.querySelectorAll('input')) input.readOnly = locked;
+      closeCheckout.disabled = locked;
+    }
+
+    function openCheckout(product) {
+      selectedProduct = product;
+      orderForm.reset();
+      quantityInput.max = Math.min(product.stock, 99);
+      quantityInput.value = 1;
+      document.querySelector('#selected-product').textContent =
+        product.name + ' · 單價 ' + currency.format(product.price_ntd);
+      checkoutMessage.textContent = '';
+      receipt.textContent = '';
+      updateEstimate();
+      checkout.showModal();
+    }
+
+    async function sendOrder(event) {
+      event.preventDefault();
+      if (submitting) return;
+      if (!pendingOrder) {
+        if (typeof crypto.randomUUID !== 'function') {
+          checkoutMessage.textContent = '請用 Chrome 開啟本機檔案，或使用 HTTPS 網址。';
+          return;
+        }
+        const fields = new FormData(orderForm);
+        pendingOrder = {
+          p_request_id: crypto.randomUUID(),
+          p_sku: selectedProduct.sku,
+          p_quantity: Number(fields.get('quantity')),
+          p_expected_price_ntd: selectedProduct.price_ntd,
+          p_name: fields.get('customer').trim(),
+          p_phone: fields.get('phone').trim(),
+          p_address: fields.get('address').trim()
+        };
+      }
+
+      submitting = true;
+      setFieldsLocked(true);
+      submitOrder.disabled = true;
+      checkoutMessage.textContent = '正在送出訂單…';
+      try {
+        const response = await fetch(SUPABASE_URL + '/rest/v1/rpc/place_figurine_order', {
+          method: 'POST',
+          headers: { apikey: SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify(pendingOrder),
+          signal: AbortSignal.timeout(15000)
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          const messages = {
+            INVALID_ORDER: '請檢查收件資料與數量。',
+            STOCK_UNAVAILABLE: '庫存已變動，請返回商品頁重新選購。',
+            PRICE_CHANGED: '價格已變動，請返回商品頁重新確認。',
+            REQUEST_CONFLICT: '訂單編號發生衝突，請重新選購。'
+          };
+          if (!Object.hasOwn(messages, result.message)) throw new Error('unknown result');
+          pendingOrder = null;
+          checkoutMessage.textContent = messages[result.message];
+          if (['STOCK_UNAVAILABLE', 'PRICE_CHANGED'].includes(result.message)) loadProducts();
+          return;
+        }
+        if (typeof result.order_id !== 'string' || !Number.isSafeInteger(result.total_ntd)) {
+          throw new Error('unknown result');
+        }
+        pendingOrder = null;
+        checkout.close();
+        receipt.textContent = '測試訂單成立。訂單編號 ' + result.order_id +
+          '，應付 ' + currency.format(result.total_ntd) + '（含運費）。教學試單，請勿匯款。';
+        loadProducts();
+      } catch {
+        checkoutMessage.textContent = '目前無法確認訂單結果。請檢查網路與第四課 SQL，再按「重試同一筆」。';
+      } finally {
+        submitting = false;
+        submitOrder.disabled = false;
+        submitOrder.textContent = pendingOrder ? '重試同一筆' : '送出測試訂單';
+        setFieldsLocked(Boolean(pendingOrder));
+      }
+    }
+
+    quantityInput.addEventListener('input', updateEstimate);
+    closeCheckout.addEventListener('click', () => checkout.close());
+    checkout.addEventListener('cancel', (event) => {
+      if (pendingOrder) event.preventDefault();
+    });
+    orderForm.addEventListener('submit', sendOrder);
+    loadProducts();
+  </script>
+</body>
+</html>
