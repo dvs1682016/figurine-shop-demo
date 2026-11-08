@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>付款與配送｜咚咚造物局 V1.11</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.6 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 38rem); margin: 2rem auto; }
+    .brand { margin: 0; color: #592d8a; }
+    h1 { margin: .2rem 0 1rem; font-size: clamp(1.9rem, 7vw, 2.6rem); }
+    h2 { margin: 0 0 .4rem; font-size: 1.3rem; }
+    section { background: white; border: 1px solid #e5d8cb; border-radius: 1rem; padding: 1rem; margin: 1rem 0; }
+    section p { margin: .35rem 0; }
+    .notice { background: #f3eaf9; color: #43245f; border-radius: .7rem; padding: .75rem 1rem; }
+    nav { display: flex; flex-wrap: wrap; gap: .75rem; }
+    nav a { padding: .55rem .85rem; border: 1px solid #592d8a; border-radius: .45rem; color: #592d8a; text-decoration: none; }
+    nav a:first-child { background: #592d8a; color: white; }
+    nav a:focus-visible { outline: 3px solid #29223d; outline-offset: 3px; }
+    footer { margin-top: 2rem; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="brand">咚咚造物局</p>
+      <h1>付款與配送</h1>
+    </header>
+    <p class="notice"><strong>付款方式為銀行轉帳。</strong> 請在店主透過咚咚造物局 LINE 聊天室確認匯款資訊後再付款。</p>
+    <section aria-labelledby="payment-title">
+      <h2 id="payment-title">付款方式</h2>
+      <p>下單後請複製訂單編號，回到咚咚造物局 LINE 聊天室提供給店主。店主會提供匯款資訊，並在核對入帳後更新訂單狀態。</p>
+    </section>
+    <section aria-labelledby="delivery-title">
+      <h2 id="delivery-title">配送與運費</h2>
+      <p>每筆訂單固定運費 <strong>NT$60</strong>，下單確認畫面會顯示含運總額。</p>
+      <p>送出前請核對收件人、手機和地址。配送方式與預計出貨時間由店主在匯款前透過 LINE 確認。</p>
+    </section>
+    <section aria-labelledby="status-title">
+      <h2 id="status-title">如何查看進度</h2>
+      <p>到「查詢訂單」，輸入完整訂單編號及下單時填寫的手機，即可查看處理狀態。</p>
+      <p>一般流程為「待付款 → 已收款 → 已出貨」。</p>
+    </section>
+    <nav aria-label="商店功能">
+      <a href="./order.html">查詢訂單</a>
+      <a href="./">返回購物頁</a>
+    </nav>
+    <footer>LINE 公仔銷售平台 V1.11 · 付款與配送</footer>
+  </main>
+</body>
+</html>

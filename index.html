@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>蕭大手作公仔店｜V1.07</title>
+  <title>咚咚造物局｜V1.11</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.6 system-ui, sans-serif; }
@@ -37,8 +37,9 @@
 <body>
   <main>
     <header>
-      <h1>蕭大手作公仔店</h1>
+      <h1>咚咚造物局</h1>
       <p>手作公仔 · 現貨商品</p>
+      <p><a href="./payment.html">付款與配送</a></p>
     </header>
     <p id="status" role="status"></p>
     <section id="products" class="grid" aria-label="商品清單"></section>
@@ -57,7 +58,7 @@
         </div>
       </form>
       <section id="order-review" hidden>
-        <p>請核對以下資料，再確認送出。</p>
+        <p>請核對以下資料，再確認送出。付款方式為銀行轉帳，由店主透過 LINE 提供匯款資訊。</p>
         <div id="review-details"></div>
         <div class="actions">
           <button id="edit-order" type="button">返回修改</button>
@@ -70,7 +71,8 @@
           <textarea id="receipt-order-id" rows="2" readonly spellcheck="false"></textarea>
         </label>
         <p id="receipt-total"></p>
-        <p>教學試單，請勿匯款。</p>
+        <p>付款方式為銀行轉帳。請複製訂單編號，回到咚咚造物局 LINE 聊天室聯絡店主，取得匯款資訊。</p>
+        <p><a href="./order.html">查詢訂單進度</a></p>
         <div class="actions">
           <button id="copy-order-id" type="button">複製訂單編號</button>
           <button id="close-receipt" type="button">返回商品頁</button>
@@ -79,10 +81,10 @@
       </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.07 · 教學下單試作</footer>
+    <footer>LINE 公仔銷售平台 V1.11 · 公仔商店</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.07
+    // LINE 公仔銷售平台 V1.11
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
     const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
