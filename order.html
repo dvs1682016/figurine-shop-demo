@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>查詢訂單｜咚咚造物局 V1.06</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 38rem); margin: 2rem auto; }
+    h1 { margin: .2rem 0; font-size: clamp(1.9rem, 7vw, 2.6rem); }
+    h2 { margin: 0 0 .55rem; font-size: 1.4rem; }
+    form, section { background: white; border: 1px solid #e5d8cb; border-radius: 1rem; padding: 1rem; margin: 1rem 0; }
+    label { display: grid; gap: .3rem; margin-bottom: .9rem; }
+    input, button { font: inherit; padding: .55rem .7rem; border-radius: .45rem; }
+    input { width: 100%; border: 1px solid #81748f; }
+    button { width: 100%; background: #592d8a; border: 1px solid #592d8a; color: white; cursor: pointer; }
+    button:disabled { opacity: .7; cursor: wait; }
+    a { color: #592d8a; }
+    #result p, #result ul { margin: .4rem 0; overflow-wrap: anywhere; }
+    #message:empty { display: none; }
+    footer { margin-top: 2rem; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <p>咚咚造物局</p>
+    <h1>查詢訂單</h1>
+    <p>請輸入下單成功畫面上的完整訂單編號，以及當時填寫的手機號碼。</p>
+    <form id="lookup-form">
+      <label>訂單編號
+        <input id="order-id" type="text" required maxlength="50" autocomplete="off"
+          autocapitalize="off" spellcheck="false" placeholder="貼上完整訂單編號">
+      </label>
+      <label>下單手機
+        <input id="phone" type="tel" inputmode="tel" required maxlength="20" autocomplete="tel"
+          placeholder="例如 0912-345-678">
+      </label>
+      <button id="lookup-button" type="submit">查詢訂單</button>
+    </form>
+    <p id="message" role="status"></p>
+    <section id="result" aria-labelledby="result-title" hidden></section>
+    <a href="./">返回購物頁</a>
+    <footer>LINE 公仔銷售平台 V1.06 · 訂單查詢</footer>
+  </main>
+  <script>
+    // LINE 公仔銷售平台 V1.06
+    const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
+    const form = document.querySelector('#lookup-form');
+    const orderId = document.querySelector('#order-id');
+    const phone = document.querySelector('#phone');
+    const button = document.querySelector('#lookup-button');
+    const message = document.querySelector('#message');
+    const result = document.querySelector('#result');
+    const labels = new Map([
+      ['pending_payment', '待付款'], ['paid', '已收款'],
+      ['shipped', '已出貨'], ['cancelled', '已取消']
+    ]);
+    const currency = new Intl.NumberFormat('zh-TW', {
+      style: 'currency', currency: 'TWD', maximumFractionDigits: 0
+    });
+    const uuidPattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+
+    function addText(parent, tag, value) {
+      const element = document.createElement(tag);
+      element.textContent = value;
+      parent.append(element);
+      return element;
+    }
+
+    function renderOrder(order) {
+      const status = labels.get(order.status);
+      if (!status || !Array.isArray(order.items) || !Number.isSafeInteger(order.total_ntd)) {
+        throw new Error('Invalid response');
+      }
+      addText(result, 'h2', '訂單狀態：' + status).id = 'result-title';
+      const items = document.createElement('ul');
+      for (const item of order.items) {
+        addText(items, 'li', item.name + ' × ' + item.quantity + '（單價 ' +
+          currency.format(item.unit_price_ntd) + '）');
+      }
+      result.append(items);
+      addText(result, 'p', '運費：' + currency.format(order.shipping_fee_ntd));
+      addText(result, 'p', '訂單總額：' + currency.format(order.total_ntd));
+      result.hidden = false;
+      message.textContent = '已找到訂單，目前狀態為' + status + '。';
+    }
+
+    async function lookup(event) {
+      event.preventDefault();
+      if (button.disabled) return;
+      result.hidden = true;
+      result.replaceChildren();
+
+      const id = orderId.value.trim();
+      const mobile = phone.value.trim().replace(/[\s-]/g, '');
+      if (!uuidPattern.test(id)) {
+        message.textContent = '請貼上完整的訂單編號，包含中間的連字號。';
+        orderId.focus();
+        return;
+      }
+      if (!/^09[0-9]{8}$/.test(mobile)) {
+        message.textContent = '請輸入 09 開頭的 10 碼手機號碼。';
+        phone.focus();
+        return;
+      }
+      if (!SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_')) {
+        message.textContent = '請先在 order.html 填入 Supabase Publishable key。';
+        return;
+      }
+
+      button.disabled = true;
+      orderId.readOnly = true;
+      phone.readOnly = true;
+      message.textContent = '正在查詢…';
+      try {
+        const response = await fetch(SUPABASE_URL + '/rest/v1/rpc/lookup_figurine_order', {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { apikey: SUPABASE_PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ p_order_id: id, p_phone: mobile }),
+          signal: AbortSignal.timeout(15000)
+        });
+        if (!response.ok) throw new Error('Lookup failed');
+        const order = await response.json();
+        if (order === null) {
+          message.textContent = '找不到符合的訂單，請核對訂單編號和下單手機。';
+          return;
+        }
+        renderOrder(order);
+      } catch {
+        message.textContent = '目前無法查詢，請稍後再試。';
+      } finally {
+        button.disabled = false;
+        orderId.readOnly = false;
+        phone.readOnly = false;
+      }
+    }
+
+    form.addEventListener('submit', lookup);
+  </script>
+</body>
+</html>
