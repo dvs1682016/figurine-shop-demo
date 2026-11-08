@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>查詢訂單｜咚咚造物局 V1.06</title>
+  <title>查詢訂單｜咚咚造物局 V1.09</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
@@ -18,6 +18,19 @@
     button:disabled { opacity: .7; cursor: wait; }
     a { color: #592d8a; }
     #result p, #result ul { margin: .4rem 0; overflow-wrap: anywhere; }
+    .result-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(7rem, 9rem); gap: 1rem; align-items: center; }
+    .result-layout.no-photos { grid-template-columns: 1fr; }
+    .order-photos { display: grid; gap: .65rem; }
+    .order-photos figure { margin: 0; text-align: center; }
+    .order-photos img, .photo-unavailable { display: block; width: 100%; aspect-ratio: 1; border-radius: .6rem; background: #f2ecf6; }
+    .order-photos img { object-fit: contain; }
+    .photo-unavailable { display: grid; place-items: center; font-size: .85rem; }
+    .order-photos figcaption { font-size: .85rem; overflow-wrap: anywhere; }
+    @media (max-width: 440px) {
+      .result-layout { grid-template-columns: 1fr; }
+      .order-photos { grid-template-columns: repeat(auto-fit, minmax(min(100%, 7rem), 9rem)); }
+    }
+    .status-pending { color: #b42318; font-weight: 700; }
     #message:empty { display: none; }
     footer { margin-top: 2rem; font-size: .9rem; }
   </style>
@@ -41,12 +54,13 @@
     <p id="message" role="status"></p>
     <section id="result" aria-labelledby="result-title" hidden></section>
     <a href="./">返回購物頁</a>
-    <footer>LINE 公仔銷售平台 V1.06 · 訂單查詢</footer>
+    <footer>LINE 公仔銷售平台 V1.09 · 訂單查詢</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.06
+    // LINE 公仔銷售平台 V1.09
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
-    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
+    const SUPABASE_PUBLISHABLE_KEY = '請貼上你的 Publishable key';
+    const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
     const form = document.querySelector('#lookup-form');
     const orderId = document.querySelector('#order-id');
     const phone = document.querySelector('#phone');
@@ -69,22 +83,65 @@
       return element;
     }
 
+    function addPhoto(photos, item) {
+      const figure = document.createElement('figure');
+      const image = document.createElement('img');
+      image.alt = item.name + ' 商品照片';
+      image.width = 144;
+      image.height = 144;
+      image.addEventListener('error', () => {
+        const fallback = document.createElement('span');
+        fallback.className = 'photo-unavailable';
+        fallback.textContent = '照片暫無法顯示';
+        image.replaceWith(fallback);
+      }, { once: true });
+      image.src = IMAGE_BASE + encodeURIComponent(item.image_filename);
+      figure.append(image);
+      addText(figure, 'figcaption', item.name);
+      photos.append(figure);
+    }
+
+    function addOrderStatus(parent, label, status) {
+      const text = addText(parent, 'span', label);
+      if (status === 'pending_payment') text.className = 'status-pending';
+    }
+
     function renderOrder(order) {
       const status = labels.get(order.status);
       if (!status || !Array.isArray(order.items) || !Number.isSafeInteger(order.total_ntd)) {
         throw new Error('Invalid response');
       }
-      addText(result, 'h2', '訂單狀態：' + status).id = 'result-title';
+      const layout = document.createElement('div');
+      layout.className = 'result-layout';
+      const details = document.createElement('div');
+      layout.append(details);
+      const title = addText(details, 'h2', '訂單狀態：');
+      title.id = 'result-title';
+      addOrderStatus(title, status, order.status);
       const items = document.createElement('ul');
       for (const item of order.items) {
         addText(items, 'li', item.name + ' × ' + item.quantity + '（單價 ' +
           currency.format(item.unit_price_ntd) + '）');
       }
-      result.append(items);
-      addText(result, 'p', '運費：' + currency.format(order.shipping_fee_ntd));
-      addText(result, 'p', '訂單總額：' + currency.format(order.total_ntd));
+      details.append(items);
+      addText(details, 'p', '運費：' + currency.format(order.shipping_fee_ntd));
+      addText(details, 'p', '訂單總額：' + currency.format(order.total_ntd));
+
+      const photographedItems = order.items.filter(item => item.image_filename);
+      if (photographedItems.length) {
+        const photos = document.createElement('div');
+        photos.className = 'order-photos';
+        for (const item of photographedItems) addPhoto(photos, item);
+        layout.append(photos);
+      } else {
+        layout.className = 'result-layout no-photos';
+      }
+
+      result.append(layout);
       result.hidden = false;
-      message.textContent = '已找到訂單，目前狀態為' + status + '。';
+      message.textContent = '已找到訂單，目前狀態為';
+      addOrderStatus(message, status, order.status);
+      message.append('。');
     }
 
     async function lookup(event) {
