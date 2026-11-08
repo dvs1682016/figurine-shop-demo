@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>咚咚造物局｜V1.12</title>
+  <style>
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.6 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 68rem); margin: 2rem auto; }
+    h1 { font-size: clamp(1.8rem, 5vw, 3rem); margin: 0; }
+    header p { margin: 0 0 1.5rem; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr)); gap: 1rem; }
+    article { background: #fff; border: 1px solid #eadfd4; border-radius: 1rem; overflow: hidden; }
+    figure { margin: 0; aspect-ratio: 4 / 3; background: #eee7f7; display: grid; place-items: center; }
+    figure img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+    .details { padding: 1rem; }
+    h2, .details p { margin: 0 0 .3rem; }
+    .price { font-size: 1.35rem; font-weight: 750; color: #592d8a; }
+    button, input { font: inherit; padding: .45rem .7rem; }
+    button { cursor: pointer; }
+    button:disabled { cursor: default; }
+    dialog { width: min(92%, 30rem); max-height: 90vh; border: 1px solid #eadfd4; border-radius: 1rem; padding: 1.25rem; }
+    dialog::backdrop { background: #29223d99; }
+    form label { display: grid; gap: .2rem; margin: .5rem 0; }
+    .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+    #review-details { overflow-wrap: anywhere; }
+    #review-details p { margin: .35rem 0; }
+    #review-details p:last-child { font-weight: 750; }
+    #receipt label { margin: .75rem 0; }
+    #receipt-order-id { width: 100%; font-family: ui-monospace, monospace; font-size: 1rem; padding: .45rem .7rem; resize: none; overflow-wrap: anywhere; }
+    #receipt-total { font-size: 1.2rem; font-weight: 750; }
+    #copy-message { min-height: 1.6em; }
+    #line-orders article { padding: 1rem; margin-bottom: .75rem; overflow-wrap: anywhere; }
+    #line-orders article p { margin: .35rem 0; }
+    footer { margin-top: 2rem; font-size: .875rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>咚咚造物局</h1>
+      <p>V1.12 LINE 綁定測試入口，測試訂單請勿匯款。</p>
+      <p>手作公仔 · 現貨商品</p>
+      <p><a href="./payment.html">付款與配送</a></p>
+    </header>
+    <p id="line-status" role="status">正在確認 LINE 帳號…</p>
+    <nav class="actions" aria-label="LINE 購物功能">
+      <button id="show-shop" type="button" hidden>返回購物</button>
+      <button id="show-orders" type="button" hidden>我的訂單</button>
+      <button id="line-login" type="button" hidden>使用 LINE 登入</button>
+    </nav>
+    <section id="line-orders" aria-label="我的訂單" hidden>
+      <h2>我的訂單</h2>
+      <p>顯示這個 LINE 帳號最近 50 筆已綁定的訂單。</p>
+      <p id="line-orders-message" role="status"></p>
+      <div id="line-order-list"></div>
+      <p><a href="./order.html">用編號查詢舊訂單</a></p>
+    </section>
+    <p id="status" role="status"></p>
+    <section id="products" class="grid" aria-label="商品清單"></section>
+    <dialog id="checkout" aria-labelledby="checkout-title">
+      <h2 id="checkout-title" tabindex="-1">填寫訂單</h2>
+      <form id="order-form">
+        <p id="selected-product"></p>
+        <label>數量<input name="quantity" type="number" min="1" max="99" step="1" required></label>
+        <label>收件人<input name="customer" maxlength="60" autocomplete="shipping name" required></label>
+        <label>手機（09 開頭，共 10 碼）<input name="phone" type="tel" inputmode="numeric" pattern="09[0-9]{8}" maxlength="10" autocomplete="shipping tel" required></label>
+        <label>收件地址<input name="address" maxlength="200" autocomplete="shipping street-address" required></label>
+        <p id="estimate"></p>
+        <div class="actions">
+          <button type="submit">下一步：確認訂單</button>
+          <button id="close-checkout" type="button">返回商品頁</button>
+        </div>
+      </form>
+      <section id="order-review" hidden>
+        <p>請核對以下資料，再確認送出。付款方式為銀行轉帳，由店主透過 LINE 提供匯款資訊。</p>
+        <div id="review-details"></div>
+        <div class="actions">
+          <button id="edit-order" type="button">返回修改</button>
+          <button id="submit-order" type="button">確認送出訂單</button>
+        </div>
+      </section>
+      <section id="receipt" hidden>
+        <p>請先儲存訂單編號，查詢訂單時會用到。</p>
+        <label>訂單編號
+          <textarea id="receipt-order-id" rows="2" readonly spellcheck="false"></textarea>
+        </label>
+        <p id="receipt-total"></p>
+        <p>付款方式為銀行轉帳。請複製訂單編號，回到咚咚造物局 LINE 聊天室聯絡店主，取得匯款資訊。</p>
+        <p><a href="./order.html">查詢訂單進度</a></p>
+        <div class="actions">
+          <button id="copy-order-id" type="button">複製訂單編號</button>
+          <button id="close-receipt" type="button">返回商品頁</button>
+        </div>
+        <p id="copy-message" role="status"></p>
+      </section>
+      <p id="checkout-message" role="status"></p>
+    </dialog>
+    <footer>LINE 公仔銷售平台 V1.12 · 公仔商店</footer>
+  </main>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script>
+    // LINE 公仔銷售平台 V1.12
+    const LIFF_ID = '2012475448-AGVHxmxw';
+    const lineStatus = document.querySelector('#line-status');
+    const loginButton = document.querySelector('#line-login');
+    const shopButton = document.querySelector('#show-shop');
+    const ordersButton = document.querySelector('#show-orders');
+    const ordersPanel = document.querySelector('#line-orders');
+    const orderList = document.querySelector('#line-order-list');
+    const ordersMessage = document.querySelector('#line-orders-message');
+    const lineOrderStatuses = new Map([
+      ['pending_payment', '待付款'], ['paid', '已收款'],
+      ['shipped', '已出貨'], ['cancelled', '已取消']
+    ]);
+    let lineToken = '';
+    const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaMy';
+    const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
+    const status = document.querySelector('#status');
+    const products = document.querySelector('#products');
+    const checkout = document.querySelector('#checkout');
+    const orderForm = document.querySelector('#order-form');
+    const checkoutTitle = document.querySelector('#checkout-title');
+    const orderReview = document.querySelector('#order-review');
+    const reviewDetails = document.querySelector('#review-details');
+    const editOrder = document.querySelector('#edit-order');
+    const quantityInput = orderForm.elements.namedItem('quantity');
+    const checkoutMessage = document.querySelector('#checkout-message');
+    const submitOrder = document.querySelector('#submit-order');
+    const closeCheckout = document.querySelector('#close-checkout');
+    const receipt = document.querySelector('#receipt');
+    const receiptOrderId = document.querySelector('#receipt-order-id');
+    const receiptTotal = document.querySelector('#receipt-total');
+    const copyMessage = document.querySelector('#copy-message');
+    const shippingFee = 60;
+    let selectedProduct;
+    let reviewedOrder;
+    let pendingOrder;
+    let submitting = false;
+    const currency = new Intl.NumberFormat('zh-TW', {
+      style: 'currency', currency: 'TWD', maximumFractionDigits: 0
+    });
+
+    function addText(parent, tag, value, className = '') {
+      const element = document.createElement(tag);
+      element.className = className;
+      element.textContent = value;
+      parent.append(element);
+    }
+
+    function makeCard(product) {
+      const card = document.createElement('article');
+      const photo = document.createElement('figure');
+      const image = document.createElement('img');
+      image.alt = product.name;
+      image.src = IMAGE_BASE + encodeURIComponent(product.image_filename);
+      image.addEventListener('error', () => {
+        photo.replaceChildren();
+        addText(photo, 'span', '照片暫時無法顯示');
+      }, { once: true });
+      photo.append(image);
+      const details = document.createElement('div');
+      details.className = 'details';
+      addText(details, 'h2', product.name);
+      addText(details, 'p', currency.format(product.price_ntd), 'price');
+      addText(details, 'p', product.stock > 0 ? '現貨 ' + product.stock + ' 件' : '已售完');
+      const buy = document.createElement('button');
+      buy.type = 'button';
+      buy.textContent = product.stock > 0 ? '購買這款' : '已售完';
+      buy.disabled = product.stock <= 0;
+      buy.addEventListener('click', () => openCheckout(product));
+      details.append(buy);
+      card.append(photo, details);
+      return card;
+    }
+
+    async function loadProducts() {
+      if (!SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_')) {
+        status.textContent = '請先在 index.html 填入本專案的 Supabase Publishable key。';
+        return;
+      }
+
+      status.textContent = '正在讀取商品…';
+      const url = new URL('/rest/v1/products', SUPABASE_URL);
+      url.searchParams.set('select', 'sku,name,price_ntd,stock,image_filename');
+      url.searchParams.set('order', 'sku.asc');
+
+      try {
+        const response = await fetch(url, { headers: { apikey: SUPABASE_PUBLISHABLE_KEY } });
+        if (!response.ok) {
+          status.textContent = '商品讀取失敗（HTTP ' + response.status + '）。請確認金鑰與第三課 SQL。';
+          return;
+        }
+        const catalog = await response.json();
+        products.replaceChildren(...catalog.map(makeCard));
+        status.textContent = catalog.length ? '' : '目前沒有上架商品。';
+      } catch {
+        status.textContent = '商品讀取失敗。請確認網路連線後重新整理。';
+      }
+    }
+
+    function updateEstimate() {
+      document.querySelector('#estimate').textContent = quantityInput.validity.valid
+        ? '含運費 ' + currency.format(shippingFee) + '，合計 ' +
+          currency.format(selectedProduct.price_ntd * quantityInput.valueAsNumber + shippingFee)
+        : '請輸入可購買的數量。';
+    }
+
+    function showEditStep() {
+      reviewedOrder = null;
+      reviewDetails.replaceChildren();
+      orderReview.hidden = true;
+      orderForm.hidden = false;
+      checkoutTitle.textContent = '填寫訂單';
+      checkoutMessage.textContent = '';
+    }
+
+    function reviewOrder(event) {
+      event.preventDefault();
+      if (orderForm.hidden || pendingOrder) return;
+      const fields = new FormData(orderForm);
+      reviewedOrder = {
+        p_sku: selectedProduct.sku,
+        p_quantity: Number(fields.get('quantity')),
+        p_expected_price_ntd: selectedProduct.price_ntd,
+        p_name: fields.get('customer').trim(),
+        p_phone: fields.get('phone').trim(),
+        p_address: fields.get('address').trim()
+      };
+      const subtotal = reviewedOrder.p_expected_price_ntd * reviewedOrder.p_quantity;
+      reviewDetails.replaceChildren();
+      addText(reviewDetails, 'p', '商品：' + selectedProduct.name);
+      addText(reviewDetails, 'p', '單價：' + currency.format(reviewedOrder.p_expected_price_ntd));
+      addText(reviewDetails, 'p', '數量：' + reviewedOrder.p_quantity);
+      addText(reviewDetails, 'p', '收件人：' + reviewedOrder.p_name);
+      addText(reviewDetails, 'p', '手機：' + reviewedOrder.p_phone);
+      addText(reviewDetails, 'p', '收件地址：' + reviewedOrder.p_address);
+      addText(reviewDetails, 'p', '商品小計：' + currency.format(subtotal));
+      addText(reviewDetails, 'p', '運費：' + currency.format(shippingFee));
+      addText(reviewDetails, 'p', '應付總金額：' + currency.format(subtotal + shippingFee));
+      orderForm.hidden = true;
+      orderReview.hidden = false;
+      checkoutTitle.textContent = '確認訂單';
+      checkoutMessage.textContent = '';
+      checkoutTitle.focus();
+    }
+
+    function openCheckout(product) {
+      selectedProduct = product;
+      orderForm.reset();
+      showEditStep();
+      quantityInput.max = Math.min(product.stock, 99);
+      quantityInput.value = 1;
+      document.querySelector('#selected-product').textContent =
+        product.name + ' · 單價 ' + currency.format(product.price_ntd);
+      checkoutMessage.textContent = '';
+      receipt.hidden = true;
+      receiptOrderId.value = '';
+      copyMessage.textContent = '';
+      updateEstimate();
+      checkout.showModal();
+    }
+
+    async function sendOrder() {
+      if (submitting || orderReview.hidden || !reviewedOrder || !lineToken) return;
+      if (!pendingOrder) {
+        if (typeof crypto.randomUUID !== 'function') {
+          checkoutMessage.textContent = '請用 Chrome 開啟本機檔案，或使用 HTTPS 網址。';
+          return;
+        }
+        pendingOrder = { p_request_id: crypto.randomUUID(), ...reviewedOrder };
+      }
+
+      submitting = true;
+      editOrder.disabled = true;
+      submitOrder.disabled = true;
+      checkoutMessage.textContent = '正在送出訂單…';
+      try {
+        const response = await lineOrderRequest({ action: 'place', order: pendingOrder });
+        if (response.status === 401) {
+          checkoutMessage.textContent = 'LINE 登入已失效。重新開啟購物頁後，請先到「我的訂單」確認是否已成立。';
+          return;
+        }
+        const result = await response.json();
+        if (!response.ok) {
+          const messages = {
+            INVALID_ORDER: '請檢查收件資料與數量。',
+            STOCK_UNAVAILABLE: '庫存已變動，請返回商品頁重新選購。',
+            PRICE_CHANGED: '價格已變動，請返回商品頁重新確認。',
+            REQUEST_CONFLICT: '訂單編號發生衝突，請重新選購。'
+          };
+          if (!Object.hasOwn(messages, result.message)) throw new Error('unknown result');
+          pendingOrder = null;
+          checkoutMessage.textContent = messages[result.message];
+          if (['STOCK_UNAVAILABLE', 'PRICE_CHANGED'].includes(result.message)) loadProducts();
+          return;
+        }
+        if (typeof result.order_id !== 'string' || !Number.isSafeInteger(result.total_ntd)) {
+          throw new Error('unknown result');
+        }
+        pendingOrder = null;
+        showReceipt(result);
+        loadProducts();
+      } catch {
+        checkoutMessage.textContent = '目前無法確認訂單結果。請檢查網路與第四課 SQL，再按「重試同一筆」。';
+      } finally {
+        submitting = false;
+        submitOrder.disabled = false;
+        submitOrder.textContent = pendingOrder ? '重試同一筆' : '確認送出訂單';
+        editOrder.disabled = Boolean(pendingOrder);
+      }
+    }
+
+    quantityInput.addEventListener('input', updateEstimate);
+    closeCheckout.addEventListener('click', () => checkout.close());
+    function showReceipt(order) {
+      reviewedOrder = null;
+      reviewDetails.replaceChildren();
+      orderReview.hidden = true;
+      orderForm.hidden = true;
+      checkoutMessage.textContent = '';
+      receiptOrderId.value = order.order_id;
+      receiptTotal.textContent = '應付總額：' + currency.format(order.total_ntd) + '（含運費）';
+      checkoutTitle.textContent = '訂單已成立';
+      receipt.hidden = false;
+      checkout.scrollTop = 0;
+      checkoutTitle.focus();
+    }
+
+    async function copyOrderId() {
+      try {
+        await navigator.clipboard.writeText(receiptOrderId.value);
+        copyMessage.textContent = '已複製訂單編號。';
+      } catch {
+        receiptOrderId.focus();
+        receiptOrderId.select();
+        receiptOrderId.setSelectionRange(0, receiptOrderId.value.length);
+        copyMessage.textContent = '已選取訂單編號，請使用手機的「拷貝」功能。';
+      }
+    }
+
+    function returnToEdit() {
+      if (pendingOrder) return;
+      showEditStep();
+      checkoutTitle.focus();
+    }
+
+    checkout.addEventListener('cancel', (event) => {
+      if (!orderReview.hidden) {
+        event.preventDefault();
+        returnToEdit();
+      }
+    });
+    editOrder.addEventListener('click', returnToEdit);
+    orderForm.addEventListener('submit', reviewOrder);
+    submitOrder.addEventListener('click', sendOrder);
+    document.querySelector('#copy-order-id').addEventListener('click', copyOrderId);
+    document.querySelector('#close-receipt').addEventListener('click', () => checkout.close());
+    function lineOrderRequest(payload) {
+      return fetch('/api/line-orders', {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { Authorization: 'Bearer ' + lineToken, 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(16000)
+      });
+    }
+
+    function showShop() {
+      ordersPanel.hidden = true;
+      shopButton.hidden = true;
+      products.hidden = false;
+      status.hidden = false;
+    }
+
+    async function showOrders() {
+      if (!lineToken || ordersButton.disabled) return;
+      ordersPanel.hidden = false;
+      shopButton.hidden = false;
+      products.hidden = true;
+      status.hidden = true;
+      ordersButton.disabled = true;
+      orderList.replaceChildren();
+      ordersMessage.textContent = '正在讀取訂單…';
+      try {
+        const response = await lineOrderRequest({ action: 'list' });
+        if (response.status === 401) {
+          ordersMessage.textContent = 'LINE 登入已失效，請重新開啟頁面。';
+          return;
+        }
+        if (!response.ok) throw new Error('orders unavailable');
+        const rows = await response.json();
+        for (const order of rows) {
+          const card = document.createElement('article');
+          const items = order.items.map(item => item.name + ' × ' + item.quantity).join('、');
+          addText(card, 'h3', lineOrderStatuses.get(order.status) || '處理中');
+          addText(card, 'p', items);
+          addText(card, 'p', '含運總額：' + currency.format(order.total_ntd));
+          addText(card, 'p', '訂單編號：' + order.id);
+          orderList.append(card);
+        }
+        ordersMessage.textContent = rows.length ? '' : '這個 LINE 帳號還沒有綁定的訂單。';
+      } catch {
+        ordersMessage.textContent = '目前無法讀取訂單，請稍後再試。';
+      } finally {
+        ordersButton.disabled = false;
+      }
+    }
+
+    async function startLineShop() {
+      try {
+        await liff.init({ liffId: LIFF_ID });
+        if (!liff.isLoggedIn()) {
+          lineStatus.textContent = '請先用 LINE 登入，再購買或查詢訂單。';
+          loginButton.hidden = false;
+          return;
+        }
+        lineToken = liff.getIDToken();
+        if (!lineToken) throw new Error('ID token unavailable');
+        lineStatus.textContent = '已用 LINE 登入。';
+        ordersButton.hidden = false;
+        loadProducts();
+        if (new URLSearchParams(location.search).get('view') === 'orders') showOrders();
+      } catch {
+        lineStatus.textContent = 'LINE 登入未完成。請從 LIFF 測試連結開啟，並確認帳號有測試權限。';
+      }
+    }
+
+    loginButton.addEventListener('click', () => liff.login());
+    shopButton.addEventListener('click', showShop);
+    ordersButton.addEventListener('click', showOrders);
+    startLineShop();
+  </script>
+</body>
+</html>
