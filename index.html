@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>蕭大手作公仔店｜V1.02</title>
+  <title>蕭大手作公仔店｜V1.05</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.6 system-ui, sans-serif; }
@@ -24,6 +24,9 @@
     dialog::backdrop { background: #29223d99; }
     form label { display: grid; gap: .2rem; margin: .5rem 0; }
     .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+    #review-details { overflow-wrap: anywhere; }
+    #review-details p { margin: .35rem 0; }
+    #review-details p:last-child { font-weight: 750; }
     #receipt { overflow-wrap: anywhere; }
     footer { margin-top: 2rem; font-size: .875rem; }
   </style>
@@ -38,32 +41,44 @@
     <section id="products" class="grid" aria-label="商品清單"></section>
     <p id="receipt" role="status"></p>
     <dialog id="checkout" aria-labelledby="checkout-title">
+      <h2 id="checkout-title" tabindex="-1">填寫訂單</h2>
       <form id="order-form">
-        <h2 id="checkout-title">填寫訂單</h2>
         <p id="selected-product"></p>
         <label>數量<input name="quantity" type="number" min="1" max="99" step="1" required></label>
         <label>收件人<input name="customer" maxlength="60" autocomplete="shipping name" required></label>
         <label>手機（09 開頭，共 10 碼）<input name="phone" type="tel" inputmode="numeric" pattern="09[0-9]{8}" maxlength="10" autocomplete="shipping tel" required></label>
         <label>收件地址<input name="address" maxlength="200" autocomplete="shipping street-address" required></label>
         <p id="estimate"></p>
-        <p id="checkout-message" role="status"></p>
         <div class="actions">
-          <button id="submit-order" type="submit">送出測試訂單</button>
+          <button type="submit">下一步：確認訂單</button>
           <button id="close-checkout" type="button">返回商品頁</button>
         </div>
       </form>
+      <section id="order-review" hidden>
+        <p>請核對以下資料，再確認送出。</p>
+        <div id="review-details"></div>
+        <div class="actions">
+          <button id="edit-order" type="button">返回修改</button>
+          <button id="submit-order" type="button">確認送出訂單</button>
+        </div>
+      </section>
+      <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.02 · 教學下單試作</footer>
+    <footer>LINE 公仔銷售平台 V1.05 · 教學下單試作</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.02
+    // LINE 公仔銷售平台 V1.05
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
-    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
+    const SUPABASE_PUBLISHABLE_KEY = '請貼上你的 Publishable key';
     const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
     const status = document.querySelector('#status');
     const products = document.querySelector('#products');
     const checkout = document.querySelector('#checkout');
     const orderForm = document.querySelector('#order-form');
+    const checkoutTitle = document.querySelector('#checkout-title');
+    const orderReview = document.querySelector('#order-review');
+    const reviewDetails = document.querySelector('#review-details');
+    const editOrder = document.querySelector('#edit-order');
     const quantityInput = orderForm.elements.namedItem('quantity');
     const checkoutMessage = document.querySelector('#checkout-message');
     const submitOrder = document.querySelector('#submit-order');
@@ -71,6 +86,7 @@
     const receipt = document.querySelector('#receipt');
     const shippingFee = 60;
     let selectedProduct;
+    let reviewedOrder;
     let pendingOrder;
     let submitting = false;
     const currency = new Intl.NumberFormat('zh-TW', {
@@ -142,14 +158,49 @@
         : '請輸入可購買的數量。';
     }
 
-    function setFieldsLocked(locked) {
-      for (const input of orderForm.querySelectorAll('input')) input.readOnly = locked;
-      closeCheckout.disabled = locked;
+    function showEditStep() {
+      reviewedOrder = null;
+      reviewDetails.replaceChildren();
+      orderReview.hidden = true;
+      orderForm.hidden = false;
+      checkoutTitle.textContent = '填寫訂單';
+      checkoutMessage.textContent = '';
+    }
+
+    function reviewOrder(event) {
+      event.preventDefault();
+      if (orderForm.hidden || pendingOrder) return;
+      const fields = new FormData(orderForm);
+      reviewedOrder = {
+        p_sku: selectedProduct.sku,
+        p_quantity: Number(fields.get('quantity')),
+        p_expected_price_ntd: selectedProduct.price_ntd,
+        p_name: fields.get('customer').trim(),
+        p_phone: fields.get('phone').trim(),
+        p_address: fields.get('address').trim()
+      };
+      const subtotal = reviewedOrder.p_expected_price_ntd * reviewedOrder.p_quantity;
+      reviewDetails.replaceChildren();
+      addText(reviewDetails, 'p', '商品：' + selectedProduct.name);
+      addText(reviewDetails, 'p', '單價：' + currency.format(reviewedOrder.p_expected_price_ntd));
+      addText(reviewDetails, 'p', '數量：' + reviewedOrder.p_quantity);
+      addText(reviewDetails, 'p', '收件人：' + reviewedOrder.p_name);
+      addText(reviewDetails, 'p', '手機：' + reviewedOrder.p_phone);
+      addText(reviewDetails, 'p', '收件地址：' + reviewedOrder.p_address);
+      addText(reviewDetails, 'p', '商品小計：' + currency.format(subtotal));
+      addText(reviewDetails, 'p', '運費：' + currency.format(shippingFee));
+      addText(reviewDetails, 'p', '應付總金額：' + currency.format(subtotal + shippingFee));
+      orderForm.hidden = true;
+      orderReview.hidden = false;
+      checkoutTitle.textContent = '確認訂單';
+      checkoutMessage.textContent = '';
+      checkoutTitle.focus();
     }
 
     function openCheckout(product) {
       selectedProduct = product;
       orderForm.reset();
+      showEditStep();
       quantityInput.max = Math.min(product.stock, 99);
       quantityInput.value = 1;
       document.querySelector('#selected-product').textContent =
@@ -160,28 +211,18 @@
       checkout.showModal();
     }
 
-    async function sendOrder(event) {
-      event.preventDefault();
-      if (submitting) return;
+    async function sendOrder() {
+      if (submitting || orderReview.hidden || !reviewedOrder) return;
       if (!pendingOrder) {
         if (typeof crypto.randomUUID !== 'function') {
           checkoutMessage.textContent = '請用 Chrome 開啟本機檔案，或使用 HTTPS 網址。';
           return;
         }
-        const fields = new FormData(orderForm);
-        pendingOrder = {
-          p_request_id: crypto.randomUUID(),
-          p_sku: selectedProduct.sku,
-          p_quantity: Number(fields.get('quantity')),
-          p_expected_price_ntd: selectedProduct.price_ntd,
-          p_name: fields.get('customer').trim(),
-          p_phone: fields.get('phone').trim(),
-          p_address: fields.get('address').trim()
-        };
+        pendingOrder = { p_request_id: crypto.randomUUID(), ...reviewedOrder };
       }
 
       submitting = true;
-      setFieldsLocked(true);
+      editOrder.disabled = true;
       submitOrder.disabled = true;
       checkoutMessage.textContent = '正在送出訂單…';
       try {
@@ -218,17 +259,28 @@
       } finally {
         submitting = false;
         submitOrder.disabled = false;
-        submitOrder.textContent = pendingOrder ? '重試同一筆' : '送出測試訂單';
-        setFieldsLocked(Boolean(pendingOrder));
+        submitOrder.textContent = pendingOrder ? '重試同一筆' : '確認送出訂單';
+        editOrder.disabled = Boolean(pendingOrder);
       }
     }
 
     quantityInput.addEventListener('input', updateEstimate);
     closeCheckout.addEventListener('click', () => checkout.close());
+    function returnToEdit() {
+      if (pendingOrder) return;
+      showEditStep();
+      checkoutTitle.focus();
+    }
+
     checkout.addEventListener('cancel', (event) => {
-      if (pendingOrder) event.preventDefault();
+      if (!orderReview.hidden) {
+        event.preventDefault();
+        returnToEdit();
+      }
     });
-    orderForm.addEventListener('submit', sendOrder);
+    editOrder.addEventListener('click', returnToEdit);
+    orderForm.addEventListener('submit', reviewOrder);
+    submitOrder.addEventListener('click', sendOrder);
     loadProducts();
   </script>
 </body>
