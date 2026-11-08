@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>蕭大手作公仔店｜V1.05</title>
+  <title>蕭大手作公仔店｜V1.07</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.6 system-ui, sans-serif; }
@@ -27,7 +27,10 @@
     #review-details { overflow-wrap: anywhere; }
     #review-details p { margin: .35rem 0; }
     #review-details p:last-child { font-weight: 750; }
-    #receipt { overflow-wrap: anywhere; }
+    #receipt label { margin: .75rem 0; }
+    #receipt-order-id { width: 100%; font-family: ui-monospace, monospace; font-size: 1rem; padding: .45rem .7rem; resize: none; overflow-wrap: anywhere; }
+    #receipt-total { font-size: 1.2rem; font-weight: 750; }
+    #copy-message { min-height: 1.6em; }
     footer { margin-top: 2rem; font-size: .875rem; }
   </style>
 </head>
@@ -39,7 +42,6 @@
     </header>
     <p id="status" role="status"></p>
     <section id="products" class="grid" aria-label="商品清單"></section>
-    <p id="receipt" role="status"></p>
     <dialog id="checkout" aria-labelledby="checkout-title">
       <h2 id="checkout-title" tabindex="-1">填寫訂單</h2>
       <form id="order-form">
@@ -62,12 +64,25 @@
           <button id="submit-order" type="button">確認送出訂單</button>
         </div>
       </section>
+      <section id="receipt" hidden>
+        <p>請先儲存訂單編號，查詢訂單時會用到。</p>
+        <label>訂單編號
+          <textarea id="receipt-order-id" rows="2" readonly spellcheck="false"></textarea>
+        </label>
+        <p id="receipt-total"></p>
+        <p>教學試單，請勿匯款。</p>
+        <div class="actions">
+          <button id="copy-order-id" type="button">複製訂單編號</button>
+          <button id="close-receipt" type="button">返回商品頁</button>
+        </div>
+        <p id="copy-message" role="status"></p>
+      </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.05 · 教學下單試作</footer>
+    <footer>LINE 公仔銷售平台 V1.07 · 教學下單試作</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.05
+    // LINE 公仔銷售平台 V1.07
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
     const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
@@ -84,6 +99,9 @@
     const submitOrder = document.querySelector('#submit-order');
     const closeCheckout = document.querySelector('#close-checkout');
     const receipt = document.querySelector('#receipt');
+    const receiptOrderId = document.querySelector('#receipt-order-id');
+    const receiptTotal = document.querySelector('#receipt-total');
+    const copyMessage = document.querySelector('#copy-message');
     const shippingFee = 60;
     let selectedProduct;
     let reviewedOrder;
@@ -206,7 +224,9 @@
       document.querySelector('#selected-product').textContent =
         product.name + ' · 單價 ' + currency.format(product.price_ntd);
       checkoutMessage.textContent = '';
-      receipt.textContent = '';
+      receipt.hidden = true;
+      receiptOrderId.value = '';
+      copyMessage.textContent = '';
       updateEstimate();
       checkout.showModal();
     }
@@ -250,9 +270,7 @@
           throw new Error('unknown result');
         }
         pendingOrder = null;
-        checkout.close();
-        receipt.textContent = '測試訂單成立。訂單編號 ' + result.order_id +
-          '，應付 ' + currency.format(result.total_ntd) + '（含運費）。教學試單，請勿匯款。';
+        showReceipt(result);
         loadProducts();
       } catch {
         checkoutMessage.textContent = '目前無法確認訂單結果。請檢查網路與第四課 SQL，再按「重試同一筆」。';
@@ -266,6 +284,32 @@
 
     quantityInput.addEventListener('input', updateEstimate);
     closeCheckout.addEventListener('click', () => checkout.close());
+    function showReceipt(order) {
+      reviewedOrder = null;
+      reviewDetails.replaceChildren();
+      orderReview.hidden = true;
+      orderForm.hidden = true;
+      checkoutMessage.textContent = '';
+      receiptOrderId.value = order.order_id;
+      receiptTotal.textContent = '應付總額：' + currency.format(order.total_ntd) + '（含運費）';
+      checkoutTitle.textContent = '訂單已成立';
+      receipt.hidden = false;
+      checkout.scrollTop = 0;
+      checkoutTitle.focus();
+    }
+
+    async function copyOrderId() {
+      try {
+        await navigator.clipboard.writeText(receiptOrderId.value);
+        copyMessage.textContent = '已複製訂單編號。';
+      } catch {
+        receiptOrderId.focus();
+        receiptOrderId.select();
+        receiptOrderId.setSelectionRange(0, receiptOrderId.value.length);
+        copyMessage.textContent = '已選取訂單編號，請使用手機的「拷貝」功能。';
+      }
+    }
+
     function returnToEdit() {
       if (pendingOrder) return;
       showEditStep();
@@ -281,6 +325,8 @@
     editOrder.addEventListener('click', returnToEdit);
     orderForm.addEventListener('submit', reviewOrder);
     submitOrder.addEventListener('click', sendOrder);
+    document.querySelector('#copy-order-id').addEventListener('click', copyOrderId);
+    document.querySelector('#close-receipt').addEventListener('click', () => checkout.close());
     loadProducts();
   </script>
 </body>
