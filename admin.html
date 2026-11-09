@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>公仔店訂單管理｜V1.13</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
+    main { width: min(100% - 2rem, 58rem); margin: 2rem auto; }
+    h1 { font-size: clamp(1.75rem, 5vw, 2.6rem); margin-bottom: .25rem; }
+    h2 { margin: 0 0 .5rem; font-size: 1.25rem; }
+    form, article { background: white; border: 1px solid #e5d8cb; border-radius: 1rem; padding: 1rem; margin-bottom: 1rem; }
+    form { max-width: 30rem; }
+    label { display: grid; gap: .2rem; margin-bottom: .75rem; }
+    input, button { font: inherit; padding: .45rem .7rem; }
+    input { width: 100%; }
+    button { background: #592d8a; color: white; border: 1px solid #592d8a; border-radius: .45rem; cursor: pointer; }
+    button.secondary { background: white; color: #592d8a; }
+    button:disabled { opacity: .65; cursor: default; }
+    .actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+    article p { margin: .35rem 0; overflow-wrap: anywhere; }
+    .order-with-photos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(10rem, 15rem); gap: 1rem; align-items: center; }
+    .order-photos { display: grid; gap: .75rem; justify-items: center; }
+    .order-photo { width: 100%; max-width: 12rem; margin: 0; text-align: center; }
+    .order-photo img, .photo-placeholder { display: block; width: 100%; aspect-ratio: 1; border-radius: .65rem; background: #f2ecf6; }
+    .order-photo img { object-fit: contain; }
+    .photo-placeholder { display: grid; place-items: center; font-size: .9rem; }
+    .order-photo figcaption { font-size: .875rem; overflow-wrap: anywhere; }
+    @media (max-width: 600px) {
+      .order-with-photos { grid-template-columns: 1fr; }
+      .order-photos { justify-items: start; }
+    }
+    footer { margin-top: 2rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>蕭大手作公仔店</h1>
+    <p>店主訂單管理</p>
+    <form id="login">
+      <h2>店主登入</h2>
+      <label>Email<input type="email" name="email" required autocomplete="username"></label>
+      <label>密碼<input type="password" name="password" required autocomplete="current-password"></label>
+      <button type="submit">登入</button>
+    </form>
+    <section id="dashboard" hidden>
+      <div class="actions">
+        <button id="refresh" type="button">重新讀取</button>
+        <button id="logout" class="secondary" type="button">登出</button>
+      </div>
+      <details>
+        <summary>銀行收款帳號設定</summary>
+        <form id="bank-form">
+          <p>測試時請使用虛構資料。</p>
+          <label>銀行名稱<input name="bank_name" maxlength="80" required></label>
+          <label>銀行代碼<input name="bank_code" inputmode="numeric" pattern="[0-9]{3}" maxlength="3" required></label>
+          <label>收款戶名<input name="account_name" maxlength="80" required></label>
+          <label>收款帳號<input name="account_number" inputmode="numeric" pattern="[0-9]{6,20}" maxlength="20" required></label>
+          <button type="submit">儲存收款帳號</button>
+          <p id="bank-message" role="status"></p>
+        </form>
+      </details>
+      <p>顯示最新 100 筆訂單</p>
+      <div id="orders" aria-label="訂單清單"></div>
+    </section>
+    <p id="message" role="status"></p>
+    <footer>LINE 公仔銷售平台 V1.13 · 訂單管理</footer>
+  </main>
+  <script>
+    // LINE 公仔銷售平台 V1.13
+    const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
+    const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
+
+    const IMAGE_BASE = SUPABASE_URL + '/storage/v1/object/public/product-images/';
+
+    const login = document.querySelector('#login');
+    const dashboard = document.querySelector('#dashboard');
+    const orders = document.querySelector('#orders');
+    const bankForm = document.querySelector('#bank-form');
+    const bankMessage = document.querySelector('#bank-message');
+    const message = document.querySelector('#message');
+    let accessToken = '';
+    let busy = false;
+
+    const labels = {
+      pending_payment: '待付款', paid: '已付款', shipped: '已出貨', cancelled: '已取消'
+    };
+    const currency = new Intl.NumberFormat('zh-TW', {
+      style: 'currency', currency: 'TWD', maximumFractionDigits: 0
+    });
+    const orderTime = new Intl.DateTimeFormat('zh-TW', {
+      dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Taipei'
+    });
+
+    async function request(path, { method = 'GET', body, token = accessToken } = {}) {
+      const headers = { apikey: SUPABASE_PUBLISHABLE_KEY };
+      if (token) headers.Authorization = 'Bearer ' + token;
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      const response = await fetch(SUPABASE_URL + path, {
+        method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(15000)
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw Object.assign(new Error(detail.message), { status: response.status });
+      }
+      if (response.status === 204) return null;
+      const content = await response.text();
+      return content ? JSON.parse(content) : null;
+    }
+
+    function showSignedOut(text) {
+      accessToken = '';
+      bankForm.reset();
+      bankMessage.textContent = '';
+      orders.replaceChildren();
+      dashboard.hidden = true;
+      login.hidden = false;
+      login.reset();
+      message.textContent = text;
+    }
+
+    async function run(task, loginAttempt = false) {
+      if (busy) return;
+      busy = true;
+      document.querySelectorAll('button').forEach(button => { button.disabled = true; });
+      try {
+        await task();
+      } catch (error) {
+        if (loginAttempt) {
+          showSignedOut(error.status === 400 || error.status === 401
+            ? '登入失敗，請確認 Email、密碼及 Publishable key。'
+            : '無法開啟後台，請確認網路及第五課 SQL。');
+        } else if (error.status === 401) {
+          showSignedOut('登入已失效，請重新登入。');
+        } else if (['INVALID_STATUS_TRANSITION', 'REPORT_CHANGED', 'PAYMENT_REPORT_REQUIRED', 'PAYMENT_REPORT_PENDING'].includes(error.message)) {
+          message.textContent = '訂單狀態已變更，請按「重新讀取」確認。';
+        } else {
+          message.textContent = '無法完成操作，請重新讀取後確認訂單狀態。';
+        }
+      } finally {
+        busy = false;
+        document.querySelectorAll('button').forEach(button => { button.disabled = false; });
+      }
+    }
+
+    function addText(parent, tag, text) {
+      const element = document.createElement(tag);
+      element.textContent = text;
+      parent.append(element);
+      return element;
+    }
+
+    function action(parent, order, next, label) {
+      const button = addText(parent, 'button', label);
+      button.type = 'button';
+      if (next === 'cancelled') button.className = 'secondary';
+      button.addEventListener('click', () => {
+        if (busy || !window.confirm('確定要「' + label + '」這筆訂單？')) return;
+        run(async () => {
+          await request('/rest/v1/rpc/update_figurine_order_status', {
+            method: 'POST', body: { p_order_id: order.id, p_next_status: next }
+          });
+          await loadOrders();
+          message.textContent = '訂單已更新為' + labels[next] + '。';
+        });
+      });
+    }
+
+    function addPhoto(photos, item, filenames) {
+      const figure = document.createElement('figure');
+      figure.className = 'order-photo';
+      const image = document.createElement('img');
+      image.alt = item.product_name + ' 商品照片';
+      image.loading = 'lazy';
+      image.width = 192;
+      image.height = 192;
+      image.addEventListener('error', () => {
+        const placeholder = document.createElement('span');
+        placeholder.className = 'photo-placeholder';
+        placeholder.textContent = '照片暫無法顯示';
+        image.replaceWith(placeholder);
+      }, { once: true });
+      const filename = filenames.get(item.product_sku) || item.product_sku.toLowerCase() + '.png';
+      image.src = IMAGE_BASE + encodeURIComponent(filename);
+      figure.append(image);
+      addText(figure, 'figcaption', item.product_name);
+      photos.append(figure);
+    }
+
+    function makeCard(order, filenames) {
+      const article = document.createElement('article');
+      const card = document.createElement('div');
+      article.append(card);
+      if (order.order_items.length) {
+        article.className = 'order-with-photos';
+        const photos = document.createElement('div');
+        photos.className = 'order-photos';
+        photos.setAttribute('aria-label', '訂購商品照片');
+        for (const item of order.order_items) addPhoto(photos, item, filenames);
+        article.append(photos);
+      }
+      addText(card, 'h2', labels[order.status] || order.status);
+      addText(card, 'p', '訂單編號 ' + order.id);
+      addText(card, 'p', '下單時間 ' + orderTime.format(new Date(order.created_at)));
+      addText(card, 'p', '收件人 ' + order.customer_name + ' · ' + order.customer_phone);
+      addText(card, 'p', '收件地址 ' + order.shipping_address);
+      const lines = document.createElement('ul');
+      let total = order.shipping_fee_ntd;
+      for (const item of order.order_items) {
+        const subtotal = item.unit_price_ntd * item.quantity;
+        total += subtotal;
+        addText(lines, 'li', item.product_name + ' × ' + item.quantity + ' · ' + currency.format(subtotal));
+      }
+      card.append(lines);
+      addText(card, 'p', '含運費合計 ' + currency.format(total));
+      const buttons = document.createElement('div');
+      buttons.className = 'actions';
+      if (order.status === 'pending_payment' && order.remittance_reported_at) {
+        addText(card, 'p', '待核對匯款 · 末五碼：' + order.remittance_last5);
+        addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(order.remittance_at)));
+        reportAction(buttons, order, true);
+        reportAction(buttons, order, false);
+      } else if (order.status === 'pending_payment') {
+        if (!order.line_user_id) action(buttons, order, 'paid', '確認收款');
+        action(buttons, order, 'cancelled', '取消訂單');
+      }
+      if (order.status === 'paid') action(buttons, order, 'shipped', '標記出貨');
+      card.append(buttons);
+      return article;
+    }
+
+    function reportAction(parent, order, confirmPayment) {
+      const label = confirmPayment ? '核對入帳，標記已付款' : '退回匯款回報';
+      const button = addText(parent, 'button', label);
+      button.type = 'button';
+      if (!confirmPayment) button.className = 'secondary';
+      button.addEventListener('click', () => {
+        if (busy || !window.confirm(confirmPayment ? '已核對銀行實際入帳金額、時間與末五碼？' : '退回後，買家可以重新回報。確定退回？')) return;
+        run(async () => {
+          const rpc = confirmPayment ? 'admin_confirm_figurine_remittance' : 'admin_return_figurine_remittance';
+          await request('/rest/v1/rpc/' + rpc, {
+            method: 'POST', body: { p_order_id: order.id, p_reported_at: order.remittance_reported_at }
+          });
+          await loadOrders();
+          message.textContent = confirmPayment ? '已付款，可以安排出貨。' : '已退回回報，訂單仍待付款。';
+        });
+      });
+    }
+
+    async function loadBank() {
+      const bank = await request('/rest/v1/rpc/admin_figurine_bank', {
+        method: 'POST', body: { p_settings: null }
+      });
+      bankForm.reset();
+      if (!bank) return;
+      for (const field of ['bank_name', 'bank_code', 'account_name', 'account_number']) {
+        bankForm.elements.namedItem(field).value = bank[field];
+      }
+    }
+
+    bankForm.addEventListener('submit', event => {
+      event.preventDefault();
+      if (busy) return;
+      const settings = Object.fromEntries(new FormData(bankForm));
+      run(async () => {
+        await request('/rest/v1/rpc/admin_figurine_bank', {
+          method: 'POST', body: { p_settings: settings }
+        });
+        bankMessage.textContent = '已儲存收款帳號。';
+      });
+    });
+
+    async function loadOrders() {
+      const query = new URLSearchParams({
+        select: 'id,created_at,customer_name,customer_phone,shipping_address,shipping_fee_ntd,status,line_user_id,remittance_last5,remittance_at,remittance_reported_at,order_items(product_sku,product_name,unit_price_ntd,quantity)',
+        order: 'created_at.desc,id.desc',
+        limit: '100'
+      });
+      const [rows, catalog] = await Promise.all([
+        request('/rest/v1/orders?' + query),
+        request('/rest/v1/products?select=sku,image_filename', { token: '' }).catch(() => [])
+      ]);
+      const filenames = new Map(catalog.map(product => [product.sku, product.image_filename]));
+      orders.replaceChildren(...rows.map(order => makeCard(order, filenames)));
+      message.textContent = rows.length ? '' : '目前沒有訂單。';
+    }
+
+    login.addEventListener('submit', event => {
+      event.preventDefault();
+      if (busy) return;
+      if (!SUPABASE_PUBLISHABLE_KEY.startsWith('sb_publishable_')) {
+        message.textContent = '請先在 admin.html 填入 Supabase Publishable key。';
+        return;
+      }
+      const fields = new FormData(login);
+      run(async () => {
+        message.textContent = '正在登入…';
+        const session = await request('/auth/v1/token?grant_type=password', {
+          method: 'POST', token: '',
+          body: { email: fields.get('email').trim(), password: fields.get('password') }
+        });
+        accessToken = session.access_token;
+        login.reset();
+        const allowed = await request('/rest/v1/rpc/is_figurine_admin', {
+          method: 'POST', body: {}
+        });
+        if (allowed !== true) {
+          showSignedOut('此帳號沒有訂單管理權限，請核對 SQL 中的 User UID。');
+          return;
+        }
+        await Promise.all([loadOrders(), loadBank()]);
+        login.hidden = true;
+        dashboard.hidden = false;
+      }, true);
+    });
+
+    document.querySelector('#refresh').addEventListener('click', () => run(loadOrders));
+    document.querySelector('#logout').addEventListener('click', () => showSignedOut('已登出。'));
+  </script>
+</body>
+</html>

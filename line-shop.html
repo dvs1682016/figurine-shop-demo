@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>咚咚造物局｜V1.12.3</title>
+  <title>咚咚造物局｜V1.13</title>
   <style>
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -33,6 +33,9 @@
     #receipt-total { font-size: 1.2rem; font-weight: 750; }
     #copy-message { min-height: 1.6em; }
     #line-orders article { padding: 1rem; margin-bottom: .75rem; overflow-wrap: anywhere; }
+    .remittance-form { margin-top: .75rem; padding: .75rem; background: #f4edf8; border-radius: .6rem; }
+    .remittance-form label { display: grid; gap: .25rem; margin: .6rem 0; }
+    .remittance-form input { min-width: 0; width: 100%; }
     #line-orders article p { margin: .35rem 0; }
     footer { margin-top: 2rem; font-size: .875rem; }
   </style>
@@ -41,7 +44,7 @@
   <main>
     <header>
       <h1>咚咚造物局</h1>
-      <p>V1.12.3 LINE 綁定測試入口，測試訂單請勿匯款。</p>
+      <p>V1.13 LINE 綁定測試入口，測試訂單請勿匯款。</p>
       <p>手作公仔 · 現貨商品</p>
       <p><a href="./payment.html">付款與配送</a></p>
     </header>
@@ -98,11 +101,11 @@
       </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.12.3 · 公仔商店</footer>
+    <footer>LINE 公仔銷售平台 V1.13 · 公仔商店</footer>
   </main>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    // LINE 公仔銷售平台 V1.12.3
+    // LINE 公仔銷售平台 V1.13
     const LIFF_ID = '2012475448-AGVHxmxw';
     const lineStatus = document.querySelector('#line-status');
     const loginButton = document.querySelector('#line-login');
@@ -112,7 +115,7 @@
     const orderList = document.querySelector('#line-order-list');
     const ordersMessage = document.querySelector('#line-orders-message');
     const lineOrderStatuses = new Map([
-      ['pending_payment', '待付款'], ['paid', '已收款'],
+      ['pending_payment', '待付款'], ['paid', '已付款'],
       ['shipped', '已出貨'], ['cancelled', '已取消']
     ]);
     let lineToken = '';
@@ -376,6 +379,94 @@
       status.hidden = false;
     }
 
+    function addRemittanceForm(card, order) {
+      const open = document.createElement('button');
+      open.type = 'button';
+      open.textContent = '查看匯款資訊／回報匯款';
+      const panel = document.createElement('div');
+      panel.className = 'remittance-form';
+      panel.hidden = true;
+      card.append(open, panel);
+      open.addEventListener('click', async () => {
+        if (open.disabled) return;
+        open.disabled = true;
+        panel.hidden = false;
+        panel.textContent = '正在讀取匯款資訊…';
+        try {
+          const response = await lineOrderRequest({ action: 'bank' });
+          if (!response.ok) throw new Error('bank unavailable');
+          const bank = await response.json();
+          panel.replaceChildren();
+          if (!bank) {
+            panel.textContent = '店家尚未設定匯款帳號。';
+            return;
+          }
+          addText(panel, 'p', bank.bank_name + '（' + bank.bank_code + '）');
+          addText(panel, 'p', '戶名：' + bank.account_name);
+          addText(panel, 'p', '帳號：' + bank.account_number);
+          addText(panel, 'p', '應匯金額：' + currency.format(order.total_ntd));
+          addText(panel, 'p', '本頁為測試，請勿實際轉帳。');
+          const form = document.createElement('form');
+          const last5 = document.createElement('input');
+          last5.type = 'text';
+          last5.inputMode = 'numeric';
+          last5.pattern = '[0-9]{5}';
+          last5.maxLength = 5;
+          last5.required = true;
+          addText(form, 'label', '付款帳號末五碼').append(last5);
+          const time = document.createElement('input');
+          time.type = 'datetime-local';
+          time.required = true;
+          addText(form, 'label', '匯款時間（台灣時間）').append(time);
+          const submit = document.createElement('button');
+          submit.type = 'submit';
+          submit.textContent = '回報匯款';
+          form.append(submit);
+          const note = addText(form, 'p', '');
+          note.setAttribute('role', 'status');
+          panel.append(form);
+          open.hidden = true;
+          form.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (submit.disabled) return;
+            const at = new Date(time.value + '+08:00');
+            if (!Number.isFinite(at.getTime())) {
+              note.textContent = '請填寫正確的匯款時間。';
+              return;
+            }
+            submit.disabled = true;
+            note.textContent = '正在回報…';
+            try {
+              const response = await lineOrderRequest({
+                action: 'report',
+                report: { id: order.id, last5: last5.value, at: at.toISOString() }
+              });
+              const result = await response.json();
+              if (response.ok && result.reported === true) {
+                await showOrders();
+                return;
+              }
+              const messages = {
+                INVALID_REMITTANCE: '請核對末五碼與匯款時間。',
+                ORDER_NOT_PAYABLE: '這筆訂單已不能回報，請重新整理訂單。',
+                ALREADY_REPORTED: '這筆訂單已有回報，請重新整理訂單。',
+                BANK_NOT_CONFIGURED: '店家尚未設定匯款帳號。'
+              };
+              note.textContent = messages[result.message] || '回報未確認，請重試相同資料或重新查看訂單。';
+            } catch {
+              note.textContent = '回報未確認，請重試相同資料或重新查看訂單。';
+            } finally {
+              submit.disabled = false;
+            }
+          });
+        } catch {
+          panel.textContent = '目前無法讀取匯款資訊，請稍後再試。';
+        } finally {
+          open.disabled = false;
+        }
+      });
+    }
+
     async function showOrders() {
       if (!lineToken || ordersButton.disabled) return;
       ordersPanel.hidden = false;
@@ -396,10 +487,14 @@
         for (const order of rows) {
           const card = document.createElement('article');
           const items = order.items.map(item => item.name + ' × ' + item.quantity).join('、');
-          addText(card, 'h3', lineOrderStatuses.get(order.status) || '處理中');
+          const pending = order.status === 'pending_payment';
+          const label = pending && order.remittance_reported ? '待核對匯款' :
+            (lineOrderStatuses.get(order.status) || '處理中');
+          addText(card, 'h3', label);
           addText(card, 'p', items);
           addText(card, 'p', '含運總額：' + currency.format(order.total_ntd));
           addText(card, 'p', '訂單編號：' + order.id);
+          if (pending && !order.remittance_reported) addRemittanceForm(card, order);
           orderList.append(card);
         }
         ordersMessage.textContent = rows.length ? '' : '這個 LINE 帳號還沒有綁定的訂單。';
