@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>公仔店訂單管理｜V1.14</title>
+  <title>公仔店訂單管理｜V1.15</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
@@ -31,6 +31,8 @@
       .order-with-photos { grid-template-columns: 1fr; }
       .order-photos { justify-items: start; }
     }
+    .batch-breakdown { margin: .75rem 0; padding: .75rem; background: #f4edf8; border-radius: .6rem; }
+    .batch-breakdown ul { padding-left: 1.2rem; }
     footer { margin-top: 2rem; }
   </style>
 </head>
@@ -65,10 +67,10 @@
       <div id="orders" aria-label="訂單清單"></div>
     </section>
     <p id="message" role="status"></p>
-    <footer>LINE 公仔銷售平台 V1.14 · 訂單管理</footer>
+    <footer>LINE 公仔銷售平台 V1.15 · 訂單管理</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.14
+    // LINE 公仔銷售平台 V1.15
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
 
@@ -214,26 +216,23 @@
         addText(lines, 'li', item.product_name + ' × ' + item.quantity + ' · ' + currency.format(subtotal));
       }
       card.append(lines);
-      addText(card, 'p', '含運費合計 ' + currency.format(total));
+      if (order.payment_batch_id) {
+        addText(card, 'p', '本筆商品金額：' + currency.format(total - order.shipping_fee_ntd));
+      } else {
+        addText(card, 'p', '含運費合計 ' + currency.format(total));
+      }
       const buttons = document.createElement('div');
       buttons.className = 'actions';
+      const batch = order.figurine_payment_batches;
+      const firstBatchCard = batch && !shownBatches.has(order.payment_batch_id);
+      if (firstBatchCard) {
+        shownBatches.add(order.payment_batch_id);
+        addBatchBreakdown(card, order.payment_batch_id, batch);
+      }
       if (order.status === 'pending_payment' && order.remittance_reported_at) {
-        addText(card, 'p', '待核對匯款 · 末五碼：' + order.remittance_last5);
-        addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(order.remittance_at)));
-        if (order.payment_batch_id) {
-          const batch = order.figurine_payment_batches;
-          addText(card, 'p', '合併付款批次：' + order.payment_batch_id);
-          if (batch && !shownBatches.has(order.payment_batch_id)) {
-            shownBatches.add(order.payment_batch_id);
-            addText(card, 'p', '整批應收：' + currency.format(batch.total_ntd) + '（' + batch.order_ids.length + ' 筆）');
-            const list = document.createElement('details');
-            addText(list, 'summary', '查看本批次的訂單編號');
-            for (const id of batch.order_ids) addText(list, 'p', id);
-            card.append(list);
-            reportAction(buttons, order, true);
-            reportAction(buttons, order, false);
-          }
-        } else {
+        if (!order.payment_batch_id || firstBatchCard) {
+          addText(card, 'p', '待核對匯款 · 末五碼：' + order.remittance_last5);
+          addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(order.remittance_at)));
           reportAction(buttons, order, true);
           reportAction(buttons, order, false);
         }
@@ -241,9 +240,49 @@
         if (!order.line_user_id) action(buttons, order, 'paid', '確認收款');
         action(buttons, order, 'cancelled', '取消訂單');
       }
-      if (order.status === 'paid') action(buttons, order, 'shipped', '標記出貨');
+      if (order.status === 'paid') {
+        if (batch?.combined_shipping) {
+          if (firstBatchCard) addBatchShipButton(buttons, order.payment_batch_id);
+        } else {
+          action(buttons, order, 'shipped', '標記出貨');
+        }
+      }
       card.append(buttons);
       return article;
+    }
+
+    function addBatchBreakdown(card, batchId, batch) {
+      const box = document.createElement('div');
+      box.className = 'batch-breakdown';
+      addText(box, 'h3', '整批商品明細（' + batch.order_ids.length + ' 筆訂單）');
+      addText(box, 'p', '批次：' + batchId);
+      const list = document.createElement('ul');
+      for (const item of batch.item_lines || []) {
+        const unit = currency.format(item.unit_price_ntd);
+        const amount = currency.format(item.unit_price_ntd * item.quantity);
+        addText(list, 'li', item.name + ' · ' + unit + ' × ' + item.quantity + ' ＝ ' + amount);
+      }
+      box.append(list);
+      addText(box, 'p', '商品小計：' + currency.format(batch.total_ntd - batch.batch_shipping_fee_ntd));
+      addText(box, 'p', (batch.combined_shipping ? '合併運費：' : '原批次運費合計：') +
+        currency.format(batch.batch_shipping_fee_ntd));
+      addText(box, 'strong', '整批應收：' + currency.format(batch.total_ntd));
+      card.append(box);
+    }
+
+    function addBatchShipButton(parent, batchId) {
+      const button = addText(parent, 'button', '整批標記已出貨');
+      button.type = 'button';
+      button.addEventListener('click', () => {
+        if (busy || !window.confirm('已將這一批商品一起寄出？')) return;
+        run(async () => {
+          await request('/rest/v1/rpc/admin_ship_figurine_batch', {
+            method: 'POST', body: { p_batch_id: batchId }
+          });
+          await loadOrders();
+          message.textContent = '整批訂單已標記出貨。';
+        });
+      });
     }
 
     function reportAction(parent, order, confirmPayment) {
@@ -292,7 +331,7 @@
 
     async function loadOrders() {
       const query = new URLSearchParams({
-        select: 'id,created_at,customer_name,customer_phone,shipping_address,shipping_fee_ntd,status,line_user_id,remittance_last5,remittance_at,remittance_reported_at,payment_batch_id,figurine_payment_batches(total_ntd,order_ids),order_items(product_sku,product_name,unit_price_ntd,quantity)',
+        select: 'id,created_at,customer_name,customer_phone,shipping_address,shipping_fee_ntd,status,line_user_id,remittance_last5,remittance_at,remittance_reported_at,payment_batch_id,figurine_payment_batches(total_ntd,order_ids,combined_shipping,batch_shipping_fee_ntd,item_lines),order_items(product_sku,product_name,unit_price_ntd,quantity)',
         order: 'created_at.desc,id.desc',
         limit: '100'
       });

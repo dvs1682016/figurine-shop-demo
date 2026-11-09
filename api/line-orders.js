@@ -1,14 +1,14 @@
-// V1.14：只使用 LINE 驗證回傳的 sub，不讀取客戶端自報的 user ID。
+// V1.15：只使用 LINE 驗證回傳的 sub，不讀取客戶端自報的 user ID。
 const LINE_CHANNEL_ID = '2012475448';
 const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
 const LINE_ISSUER = 'https://access.line.me';
 const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
-const BATCH_ERRORS = new Set(['INVALID_BATCH','BATCH_CONFLICT','ORDER_NOT_PAYABLE','TOTAL_CHANGED','BANK_NOT_CONFIGURED']);
+const BATCH_ERRORS = new Set(['INVALID_BATCH','BATCH_CONFLICT','ORDER_NOT_PAYABLE','TOTAL_CHANGED','BANK_NOT_CONFIGURED','DELIVERY_MISMATCH']);
 const ORDER_ERRORS = new Set(['INVALID_ORDER', 'STOCK_UNAVAILABLE', 'PRICE_CHANGED', 'REQUEST_CONFLICT']);
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('X-Figurine-Version', '1.14');
+  res.setHeader('X-Figurine-Version', '1.15');
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ message: 'METHOD_NOT_ALLOWED' });

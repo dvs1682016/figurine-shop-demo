@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>咚咚造物局｜V1.14</title>
+  <title>咚咚造物局｜V1.15</title>
   <style>
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -44,7 +44,7 @@
   <main>
     <header>
       <h1>咚咚造物局</h1>
-      <p>V1.14 LINE 綁定測試入口，測試訂單請勿匯款。</p>
+      <p>V1.15 LINE 綁定測試入口，測試訂單請勿匯款。</p>
       <p>手作公仔 · 現貨商品</p>
       <p><a href="./payment.html">付款與配送</a></p>
     </header>
@@ -102,11 +102,11 @@
       </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.14 · 公仔商店</footer>
+    <footer>LINE 公仔銷售平台 V1.15 · 公仔商店</footer>
   </main>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    // LINE 公仔銷售平台 V1.14
+    // LINE 公仔銷售平台 V1.15
     const LIFF_ID = '2012475448-AGVHxmxw';
     const lineStatus = document.querySelector('#line-status');
     const loginButton = document.querySelector('#line-login');
@@ -382,6 +382,24 @@
       status.hidden = false;
     }
 
+    const combinedShippingFee = 60;
+
+    function addCombinedBreakdown(panel, selected, subtotal, total) {
+      addText(panel, 'h3', '合併出貨費用明細');
+      const list = document.createElement('ul');
+      for (const order of selected) {
+        for (const item of order.items) {
+          const unit = currency.format(item.unit_price_ntd);
+          const amount = currency.format(item.unit_price_ntd * item.quantity);
+          addText(list, 'li', item.name + ' · ' + unit + ' × ' + item.quantity + ' ＝ ' + amount);
+        }
+      }
+      panel.append(list);
+      addText(panel, 'p', '商品小計：' + currency.format(subtotal));
+      addText(panel, 'p', '合併運費：' + currency.format(combinedShippingFee));
+      addText(panel, 'strong', '應付總額：' + currency.format(total));
+    }
+
     function addRemittanceForm(card, order) {
       const batch = Array.isArray(order.order_ids);
       let batchId;
@@ -409,16 +427,7 @@
           addText(panel, 'p', bank.bank_name + '（' + bank.bank_code + '）');
           addText(panel, 'p', '戶名：' + bank.account_name);
           addText(panel, 'p', '帳號：' + bank.account_number);
-          addText(panel, 'p', '應匯金額：' + currency.format(order.total_ntd));
-          if (batch) {
-            addText(panel, 'p', '合併付款保留各筆訂單原有的運費。');
-            const list = document.createElement('ul');
-            for (const selected of order.selected) {
-              const names = selected.items.map(item => item.name + ' × ' + item.quantity).join('、');
-              addText(list, 'li', names + ' · ' + currency.format(selected.total_ntd));
-            }
-            panel.append(list);
-          }
+          if (!batch) addText(panel, 'p', '應匯金額：' + currency.format(order.total_ntd));
           addText(panel, 'p', '本頁為測試，請勿實際轉帳。');
           const form = document.createElement('form');
           const last5 = document.createElement('input');
@@ -467,6 +476,7 @@
                 INVALID_REMITTANCE: '請核對末五碼與匯款時間。',
                 INVALID_BATCH: '請核對合併訂單、末五碼與匯款時間。',
                 BATCH_CONFLICT: '這筆合併回報已變更，請重新讀取訂單。',
+                DELIVERY_MISMATCH: '這些訂單的收件資料不同，請分開付款。',
                 TOTAL_CHANGED: '訂單金額已變更，請重新查詢後與店主核對。',
                 ORDER_NOT_PAYABLE: '這筆訂單已不能回報，請重新整理訂單。',
                 ALREADY_REPORTED: '這筆訂單已有回報，請重新整理訂單。',
@@ -522,7 +532,12 @@
             (lineOrderStatuses.get(order.status) || '處理中');
           addText(card, 'h3', label);
           addText(card, 'p', items);
-          addText(card, 'p', '含運總額：' + currency.format(order.total_ntd));
+          if (order.batch_id) {
+            addText(card, 'p', '本筆商品金額：' + currency.format(order.subtotal_ntd));
+            addText(card, 'p', '合併付款整批總額：' + currency.format(order.batch_total_ntd));
+          } else {
+            addText(card, 'p', '含運總額：' + currency.format(order.total_ntd));
+          }
           addText(card, 'p', '訂單編號：' + order.id);
           if (pending && !order.remittance_reported) {
             addRemittanceForm(card, order);
@@ -536,14 +551,21 @@
                 if (checkbox.checked) selected.set(order.id, order);
                 else selected.delete(order.id);
                 const chosen = [...selected.values()];
-                const total = chosen.reduce((sum, item) => sum + item.total_ntd, 0);
-                summary.textContent = chosen.length ? '已選 ' + chosen.length + ' 筆，含運合計 ' + currency.format(total) : '';
+                summary.textContent = chosen.length ? '已選 ' + chosen.length + ' 筆訂單' : '';
                 batchForm.replaceChildren();
-                if (chosen.length >= 2) {
-                  addRemittanceForm(batchForm, {
-                    selected: chosen, order_ids: chosen.map(item => item.id), total_ntd: total
-                  });
+                if (chosen.length < 2) return;
+                if (chosen.some(item => item.delivery_group !== chosen[0].delivery_group)) {
+                  addText(batchForm, 'p', '收件人、手機或地址不同，請選擇收件資料相同的訂單。');
+                  return;
                 }
+                if (chosen.some(item => !Number.isSafeInteger(item.subtotal_ntd))) {
+                  addText(batchForm, 'p', '無法核算商品金額，請重新載入訂單。');
+                  return;
+                }
+                const subtotal = chosen.reduce((sum, item) => sum + item.subtotal_ntd, 0);
+                const total = subtotal + combinedShippingFee;
+                addCombinedBreakdown(batchForm, chosen, subtotal, total);
+                addRemittanceForm(batchForm, { order_ids: chosen.map(item => item.id), total_ntd: total });
               });
             }
           }
