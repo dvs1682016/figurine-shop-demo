@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>咚咚造物局｜V1.15.3</title>
+  <title>咚咚造物局｜V1.15.4</title>
   <style>
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -30,7 +30,7 @@
     #review-details p:last-child { font-weight: 750; }
     #receipt label { margin: .75rem 0; }
     #receipt-order-id { width: 100%; font-family: ui-monospace, monospace; font-size: 1rem; padding: .45rem .7rem; resize: none; overflow-wrap: anywhere; }
-    #receipt-total { font-size: 1.2rem; font-weight: 750; }
+    #receipt-breakdown strong { font-size: 1.2rem; }
     #copy-message { min-height: 1.6em; }
     #line-orders article { padding: 1rem; margin-bottom: .75rem; overflow-wrap: anywhere; }
     .remittance-form { margin-top: .75rem; padding: .75rem; background: #f4edf8; border-radius: .6rem; }
@@ -52,7 +52,7 @@
   <main>
     <header>
       <h1>咚咚造物局</h1>
-      <p>V1.15.3 LINE 綁定測試入口，測試訂單請勿匯款。</p>
+      <p>V1.15.4 LINE 綁定測試入口，測試訂單請勿匯款。</p>
       <p>手作公仔 · 現貨商品</p>
       <p><a href="./payment.html">付款與配送</a></p>
     </header>
@@ -99,7 +99,7 @@
         <label>訂單編號
           <textarea id="receipt-order-id" rows="2" readonly spellcheck="false"></textarea>
         </label>
-        <p id="receipt-total"></p>
+        <div id="receipt-breakdown"></div>
         <p>付款方式為銀行轉帳。請複製訂單編號，回到咚咚造物局 LINE 聊天室聯絡店主，取得匯款資訊。</p>
         <p><button id="receipt-orders" type="button">查看我的訂單</button></p>
         <div class="actions">
@@ -110,11 +110,11 @@
       </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.15.3 · 公仔商店</footer>
+    <footer>LINE 公仔銷售平台 V1.15.4 · 公仔商店</footer>
   </main>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    // LINE 公仔銷售平台 V1.15.3
+    // LINE 公仔銷售平台 V1.15.4
     const LIFF_ID = '2012475448-AGVHxmxw';
     const lineStatus = document.querySelector('#line-status');
     const loginButton = document.querySelector('#line-login');
@@ -146,7 +146,7 @@
     const closeCheckout = document.querySelector('#close-checkout');
     const receipt = document.querySelector('#receipt');
     const receiptOrderId = document.querySelector('#receipt-order-id');
-    const receiptTotal = document.querySelector('#receipt-total');
+    const receiptBreakdown = document.querySelector('#receipt-breakdown');
     const copyMessage = document.querySelector('#copy-message');
     const shippingFee = 60;
     let selectedProduct;
@@ -254,7 +254,7 @@
       addText(reviewDetails, 'p', '收件地址：' + reviewedOrder.p_address);
       addText(reviewDetails, 'p', '商品小計：' + currency.format(subtotal));
       addText(reviewDetails, 'p', '運費：' + currency.format(shippingFee));
-      addText(reviewDetails, 'p', '應付總金額：' + currency.format(subtotal + shippingFee));
+      addText(reviewDetails, 'p', '應付金額：' + currency.format(subtotal + shippingFee));
       orderForm.hidden = true;
       orderReview.hidden = false;
       checkoutTitle.textContent = '確認訂單';
@@ -315,8 +315,13 @@
         if (result.line_linked !== true || result.order_id !== pendingOrder.p_request_id || !Number.isSafeInteger(result.total_ntd)) {
           throw new Error('unknown result');
         }
+        const purchased = {
+          name: selectedProduct.name,
+          quantity: pendingOrder.p_quantity,
+          unit_price_ntd: pendingOrder.p_expected_price_ntd
+        };
         pendingOrder = null;
-        showReceipt(result);
+        showReceipt(result, purchased);
         loadProducts();
       } catch {
         checkoutMessage.textContent = '目前無法確認訂單結果。請檢查網路與第四課 SQL，再按「重試同一筆」。';
@@ -330,14 +335,16 @@
 
     quantityInput.addEventListener('input', updateEstimate);
     closeCheckout.addEventListener('click', () => checkout.close());
-    function showReceipt(order) {
+    function showReceipt(order, purchased) {
       reviewedOrder = null;
       reviewDetails.replaceChildren();
       orderReview.hidden = true;
       orderForm.hidden = true;
       checkoutMessage.textContent = '';
       receiptOrderId.value = order.order_id;
-      receiptTotal.textContent = '應付總額：' + currency.format(order.total_ntd) + '（含運費）';
+      const subtotal = purchased.unit_price_ntd * purchased.quantity;
+      receiptBreakdown.replaceChildren();
+      addPriceBreakdown(receiptBreakdown, [purchased], order.total_ntd - subtotal, order.total_ntd);
       checkoutTitle.textContent = '訂單已成立，已綁定 LINE';
       receipt.hidden = false;
       checkout.scrollTop = 0;
@@ -400,11 +407,13 @@
       for (const item of items) {
         const unit = currency.format(item.unit_price_ntd);
         const amount = currency.format(item.unit_price_ntd * item.quantity);
-        addText(list, 'li', item.name + '：' + unit + ' × ' + item.quantity + ' ＝ ' + amount);
+        const row = addText(list, 'li', '');
+        addText(row, 'div', item.name);
+        addText(row, 'div', '單價 ' + unit + ' × 數量 ' + item.quantity + ' ＝ ' + amount);
       }
       box.append(list);
       if (Number.isSafeInteger(shipping)) addText(box, 'p', '運費：' + currency.format(shipping));
-      addText(box, 'strong', '合計：' + currency.format(total));
+      addText(box, 'strong', '應付金額：' + currency.format(total));
       panel.append(box);
     }
 
