@@ -1,12 +1,14 @@
-// V1.13：只使用 LINE 驗證回傳的 sub，不讀取客戶端自報的 user ID。
+// V1.14：只使用 LINE 驗證回傳的 sub，不讀取客戶端自報的 user ID。
 const LINE_CHANNEL_ID = '2012475448';
 const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
 const LINE_ISSUER = 'https://access.line.me';
+const UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
+const BATCH_ERRORS = new Set(['INVALID_BATCH','BATCH_CONFLICT','ORDER_NOT_PAYABLE','TOTAL_CHANGED','BANK_NOT_CONFIGURED']);
 const ORDER_ERRORS = new Set(['INVALID_ORDER', 'STOCK_UNAVAILABLE', 'PRICE_CHANGED', 'REQUEST_CONFLICT']);
 
 module.exports = async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
-  res.setHeader('X-Figurine-Version', '1.13');
+  res.setHeader('X-Figurine-Version', '1.14');
   if (req.method !== 'POST') {
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ message: 'METHOD_NOT_ALLOWED' });
@@ -16,7 +18,7 @@ module.exports = async function handler(req, res) {
   if (!token) return res.status(401).json({ message: 'LINE_LOGIN_REQUIRED' });
 
   const { action, order, report } = req.body || {};
-  if (!['list', 'bank', 'report'].includes(action) && (action !== 'place' || !order || typeof order !== 'object' || Array.isArray(order))) {
+  if (!['list', 'bank', 'report', 'batch'].includes(action) && (action !== 'place' || !order || typeof order !== 'object' || Array.isArray(order))) {
     return res.status(400).json({ message: 'INVALID_ORDER' });
   }
 
@@ -25,6 +27,16 @@ module.exports = async function handler(req, res) {
       typeof report.last5 !== 'string' || !/^[0-9]{5}$/.test(report.last5) ||
       typeof report.at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(report.at))) {
     return res.status(400).json({ message: 'INVALID_REMITTANCE' });
+  }
+
+  if (action === 'batch' && (!report || typeof report.id !== 'string' || !UUID.test(report.id) ||
+      !Array.isArray(report.order_ids) || report.order_ids.length < 2 || report.order_ids.length > 50 ||
+      !report.order_ids.every(id => typeof id === 'string' && UUID.test(id)) ||
+      new Set(report.order_ids.map(id => id.toLowerCase())).size !== report.order_ids.length ||
+      !Number.isSafeInteger(report.total_ntd) || report.total_ntd <= 0 ||
+      typeof report.last5 !== 'string' || !/^[0-9]{5}$/.test(report.last5) ||
+      typeof report.at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(report.at))) {
+    return res.status(400).json({ message: 'INVALID_BATCH' });
   }
 
   const key = process.env.SUPABASE_SECRET_KEY;
@@ -52,6 +64,10 @@ module.exports = async function handler(req, res) {
       place: ['place_line_figurine_order', { p_line_user_id: identity.sub, p_order: order }],
       list: ['list_line_figurine_orders', { p_line_user_id: identity.sub }],
       bank: ['figurine_bank_for_checkout', {}],
+      batch: ['report_figurine_payment_batch', {
+        p_line_user_id: identity.sub, p_batch_id: report?.id, p_order_ids: report?.order_ids,
+        p_expected_total: report?.total_ntd, p_last5: report?.last5, p_transferred_at: report?.at
+      }],
       report: ['report_figurine_remittance', {
         p_line_user_id: identity.sub, p_order_id: report?.id,
         p_last5: report?.last5, p_transferred_at: report?.at
@@ -69,6 +85,9 @@ module.exports = async function handler(req, res) {
       if (placing && ORDER_ERRORS.has(data.message)) return res.status(409).json({ message: data.message });
       if (action === 'report' && ['INVALID_REMITTANCE', 'ORDER_NOT_PAYABLE', 'ALREADY_REPORTED',
         'BANK_NOT_CONFIGURED'].includes(data.message)) return res.status(409).json({ message: data.message });
+      if (action === 'batch' && BATCH_ERRORS.has(data.message)) {
+        return res.status(409).json({ message: data.message });
+      }
       return res.status(502).json({ message: 'DATABASE_UNAVAILABLE' });
     }
     if (placing && (data?.line_linked !== true || typeof order.p_request_id !== 'string' ||

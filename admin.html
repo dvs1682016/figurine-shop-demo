@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>公仔店訂單管理｜V1.13</title>
+  <title>公仔店訂單管理｜V1.14</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
@@ -65,10 +65,10 @@
       <div id="orders" aria-label="訂單清單"></div>
     </section>
     <p id="message" role="status"></p>
-    <footer>LINE 公仔銷售平台 V1.13 · 訂單管理</footer>
+    <footer>LINE 公仔銷售平台 V1.14 · 訂單管理</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.13
+    // LINE 公仔銷售平台 V1.14
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
 
@@ -189,7 +189,7 @@
       photos.append(figure);
     }
 
-    function makeCard(order, filenames) {
+    function makeCard(order, filenames, shownBatches) {
       const article = document.createElement('article');
       const card = document.createElement('div');
       article.append(card);
@@ -220,8 +220,23 @@
       if (order.status === 'pending_payment' && order.remittance_reported_at) {
         addText(card, 'p', '待核對匯款 · 末五碼：' + order.remittance_last5);
         addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(order.remittance_at)));
-        reportAction(buttons, order, true);
-        reportAction(buttons, order, false);
+        if (order.payment_batch_id) {
+          const batch = order.figurine_payment_batches;
+          addText(card, 'p', '合併付款批次：' + order.payment_batch_id);
+          if (batch && !shownBatches.has(order.payment_batch_id)) {
+            shownBatches.add(order.payment_batch_id);
+            addText(card, 'p', '整批應收：' + currency.format(batch.total_ntd) + '（' + batch.order_ids.length + ' 筆）');
+            const list = document.createElement('details');
+            addText(list, 'summary', '查看本批次的訂單編號');
+            for (const id of batch.order_ids) addText(list, 'p', id);
+            card.append(list);
+            reportAction(buttons, order, true);
+            reportAction(buttons, order, false);
+          }
+        } else {
+          reportAction(buttons, order, true);
+          reportAction(buttons, order, false);
+        }
       } else if (order.status === 'pending_payment') {
         if (!order.line_user_id) action(buttons, order, 'paid', '確認收款');
         action(buttons, order, 'cancelled', '取消訂單');
@@ -232,17 +247,20 @@
     }
 
     function reportAction(parent, order, confirmPayment) {
-      const label = confirmPayment ? '核對入帳，標記已付款' : '退回匯款回報';
+      const batch = order.payment_batch_id;
+      const label = batch ? (confirmPayment ? '核對入帳，整批標記已付款' : '整批退回匯款回報') :
+        (confirmPayment ? '核對入帳，標記已付款' : '退回匯款回報');
       const button = addText(parent, 'button', label);
       button.type = 'button';
       if (!confirmPayment) button.className = 'secondary';
       button.addEventListener('click', () => {
         if (busy || !window.confirm(confirmPayment ? '已核對銀行實際入帳金額、時間與末五碼？' : '退回後，買家可以重新回報。確定退回？')) return;
         run(async () => {
-          const rpc = confirmPayment ? 'admin_confirm_figurine_remittance' : 'admin_return_figurine_remittance';
-          await request('/rest/v1/rpc/' + rpc, {
-            method: 'POST', body: { p_order_id: order.id, p_reported_at: order.remittance_reported_at }
-          });
+          const rpc = batch ? 'admin_resolve_figurine_batch' :
+            (confirmPayment ? 'admin_confirm_figurine_remittance' : 'admin_return_figurine_remittance');
+          const body = batch ? { p_batch_id: batch, p_confirm: confirmPayment } :
+            { p_order_id: order.id, p_reported_at: order.remittance_reported_at };
+          await request('/rest/v1/rpc/' + rpc, { method: 'POST', body });
           await loadOrders();
           message.textContent = confirmPayment ? '已付款，可以安排出貨。' : '已退回回報，訂單仍待付款。';
         });
@@ -274,7 +292,7 @@
 
     async function loadOrders() {
       const query = new URLSearchParams({
-        select: 'id,created_at,customer_name,customer_phone,shipping_address,shipping_fee_ntd,status,line_user_id,remittance_last5,remittance_at,remittance_reported_at,order_items(product_sku,product_name,unit_price_ntd,quantity)',
+        select: 'id,created_at,customer_name,customer_phone,shipping_address,shipping_fee_ntd,status,line_user_id,remittance_last5,remittance_at,remittance_reported_at,payment_batch_id,figurine_payment_batches(total_ntd,order_ids),order_items(product_sku,product_name,unit_price_ntd,quantity)',
         order: 'created_at.desc,id.desc',
         limit: '100'
       });
@@ -283,7 +301,8 @@
         request('/rest/v1/products?select=sku,image_filename', { token: '' }).catch(() => [])
       ]);
       const filenames = new Map(catalog.map(product => [product.sku, product.image_filename]));
-      orders.replaceChildren(...rows.map(order => makeCard(order, filenames)));
+      const shownBatches = new Set();
+      orders.replaceChildren(...rows.map(order => makeCard(order, filenames, shownBatches)));
       message.textContent = rows.length ? '' : '目前沒有訂單。';
     }
 
