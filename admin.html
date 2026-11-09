@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>公仔店訂單管理｜V1.15.7</title>
+  <title>公仔店訂單管理｜V1.15.8</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
@@ -67,10 +67,10 @@
       <div id="orders" aria-label="訂單清單"></div>
     </section>
     <p id="message" role="status"></p>
-    <footer>LINE 公仔銷售平台 V1.15.7 · 訂單管理</footer>
+    <footer>LINE 公仔銷售平台 V1.15.8 · 訂單管理</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.15.7
+    // LINE 公仔銷售平台 V1.15.8
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
 
@@ -251,13 +251,14 @@
       return article;
     }
 
-    function makePendingBatchCard(batchOrders, filenames) {
+    function makeBatchCard(batchOrders, filenames) {
       const first = batchOrders[0];
       const batch = first.figurine_payment_batches;
       const article = document.createElement('article');
       const card = document.createElement('div');
       article.append(card);
-      addText(card, 'h2', '待核對匯款 - 合併匯款');
+      const shipped = first.status === 'shipped';
+      addText(card, 'h2', shipped ? '已出貨 - 合併匯款' : '待核對匯款 - 合併匯款');
 
       const deliveries = new Map();
       for (const order of batchOrders) {
@@ -276,14 +277,16 @@
       }
 
       addBatchBreakdown(card, first.payment_batch_id, batch);
-      addText(card, 'p', '待核對匯款 · 末五碼：' + first.remittance_last5);
-      addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(first.remittance_at)));
+      if (!shipped) {
+        addText(card, 'p', '待核對匯款 · 末五碼：' + first.remittance_last5);
+        addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(first.remittance_at)));
 
-      const buttons = document.createElement('div');
-      buttons.className = 'actions';
-      reportAction(buttons, first, true);
-      reportAction(buttons, first, false);
-      card.append(buttons);
+        const buttons = document.createElement('div');
+        buttons.className = 'actions';
+        reportAction(buttons, first, true);
+        reportAction(buttons, first, false);
+        card.append(buttons);
+      }
 
       const items = new Map();
       for (const order of batchOrders) {
@@ -300,25 +303,36 @@
       return article;
     }
 
+    function groupedBatchKey(order) {
+      if (!order.payment_batch_id || !order.figurine_payment_batches) return null;
+      if (order.status === 'pending_payment' && order.remittance_reported_at) {
+        return 'pending:' + order.payment_batch_id;
+      }
+      if (order.status === 'shipped' && order.figurine_payment_batches.combined_shipping) {
+        return 'shipped:' + order.payment_batch_id;
+      }
+      return null;
+    }
+
     function renderAdminOrders(rows, filenames) {
-      const pending = new Map();
+      const groups = new Map();
       for (const order of rows) {
-        if (order.status !== 'pending_payment' || !order.remittance_reported_at ||
-            !order.payment_batch_id || !order.figurine_payment_batches) continue;
-        if (!pending.has(order.payment_batch_id)) pending.set(order.payment_batch_id, []);
-        pending.get(order.payment_batch_id).push(order);
+        const key = groupedBatchKey(order);
+        if (!key) continue;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(order);
       }
       const shownBatches = new Set();
+      const shownGroups = new Set();
       const cards = [];
       for (const order of rows) {
-        const batchId = order.payment_batch_id;
-        if (pending.has(batchId) && order.status === 'pending_payment' && order.remittance_reported_at) {
-          if (!shownBatches.has(batchId)) {
-            cards.push(makePendingBatchCard(pending.get(batchId), filenames));
-            shownBatches.add(batchId);
-          }
-        } else {
+        const key = groupedBatchKey(order);
+        if (!key) {
           cards.push(makeCard(order, filenames, shownBatches));
+        } else if (!shownGroups.has(key)) {
+          cards.push(makeBatchCard(groups.get(key), filenames));
+          shownGroups.add(key);
+          if (order.status === 'pending_payment') shownBatches.add(order.payment_batch_id);
         }
       }
       orders.replaceChildren(...cards);
