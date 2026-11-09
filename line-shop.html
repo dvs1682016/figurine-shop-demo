@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>咚咚造物局｜V1.15.1</title>
+  <title>咚咚造物局｜V1.15.3</title>
   <style>
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -36,6 +36,11 @@
     .remittance-form { margin-top: .75rem; padding: .75rem; background: #f4edf8; border-radius: .6rem; }
     .remittance-form label { display: grid; gap: .25rem; margin: .6rem 0; }
     .remittance-form input { min-width: 0; width: 100%; }
+    .batch-remittance-label { color: #b42318; font-weight: 700; }
+    .batch-order-list { padding-left: 1.3rem; }
+    .batch-order-list li { margin: .35rem 0; }
+    .price-breakdown { margin: .65rem 0; }
+    .price-breakdown strong { display: block; margin-top: .4rem; }
     .batch-choice { display: flex; align-items: center; gap: .55rem; min-height: 2.75rem; }
     .batch-choice input { width: 1.2rem; height: 1.2rem; flex: none; }
     .batch-choice.is-included { color: #592d8a; font-weight: 700; }
@@ -47,7 +52,7 @@
   <main>
     <header>
       <h1>咚咚造物局</h1>
-      <p>V1.15.1 LINE 綁定測試入口，測試訂單請勿匯款。</p>
+      <p>V1.15.3 LINE 綁定測試入口，測試訂單請勿匯款。</p>
       <p>手作公仔 · 現貨商品</p>
       <p><a href="./payment.html">付款與配送</a></p>
     </header>
@@ -105,11 +110,11 @@
       </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.15.1 · 公仔商店</footer>
+    <footer>LINE 公仔銷售平台 V1.15.3 · 公仔商店</footer>
   </main>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    // LINE 公仔銷售平台 V1.15.1
+    // LINE 公仔銷售平台 V1.15.3
     const LIFF_ID = '2012475448-AGVHxmxw';
     const lineStatus = document.querySelector('#line-status');
     const loginButton = document.querySelector('#line-login');
@@ -387,20 +392,25 @@
 
     const combinedShippingFee = 60;
 
-    function addCombinedBreakdown(panel, selected, subtotal, total) {
-      addText(panel, 'h3', '合併出貨費用明細');
+    function addPriceBreakdown(panel, items, shipping, total) {
+      const box = document.createElement('div');
+      box.className = 'price-breakdown';
       const list = document.createElement('ul');
-      for (const order of selected) {
-        for (const item of order.items) {
-          const unit = currency.format(item.unit_price_ntd);
-          const amount = currency.format(item.unit_price_ntd * item.quantity);
-          addText(list, 'li', item.name + ' · ' + unit + ' × ' + item.quantity + ' ＝ ' + amount);
-        }
+      list.className = 'batch-order-list';
+      for (const item of items) {
+        const unit = currency.format(item.unit_price_ntd);
+        const amount = currency.format(item.unit_price_ntd * item.quantity);
+        addText(list, 'li', item.name + '：' + unit + ' × ' + item.quantity + ' ＝ ' + amount);
       }
-      panel.append(list);
-      addText(panel, 'p', '商品小計：' + currency.format(subtotal));
-      addText(panel, 'p', '合併運費：' + currency.format(combinedShippingFee));
-      addText(panel, 'strong', '應付總額：' + currency.format(total));
+      box.append(list);
+      if (Number.isSafeInteger(shipping)) addText(box, 'p', '運費：' + currency.format(shipping));
+      addText(box, 'strong', '合計：' + currency.format(total));
+      panel.append(box);
+    }
+
+    function addCombinedBreakdown(panel, selected, total) {
+      addText(panel, 'h3', '合併出貨費用明細');
+      addPriceBreakdown(panel, selected.flatMap(order => order.items), combinedShippingFee, total);
     }
 
     function addRemittanceForm(card, order) {
@@ -430,7 +440,6 @@
           addText(panel, 'p', bank.bank_name + '（' + bank.bank_code + '）');
           addText(panel, 'p', '戶名：' + bank.account_name);
           addText(panel, 'p', '帳號：' + bank.account_number);
-          if (!batch) addText(panel, 'p', '應匯金額：' + currency.format(order.total_ntd));
           addText(panel, 'p', '本頁為測試，請勿實際轉帳。');
           const form = document.createElement('form');
           const last5 = document.createElement('input');
@@ -500,6 +509,30 @@
       });
     }
 
+    function renderBatch(batchOrders) {
+      const order = batchOrders[0];
+      const card = document.createElement('article');
+      const ids = order.batch_order_ids || batchOrders.map(item => item.id);
+      const states = order.batch_order_statuses || Object.fromEntries(batchOrders.map(item => [item.id, item.status]));
+      const uniqueStates = new Set(Object.values(states));
+      const commonState = uniqueStates.size === 1 ? Object.values(states)[0] : null;
+      const label = commonState === 'pending_payment' ? '待核對匯款' : lineOrderStatuses.get(commonState);
+      const title = addText(card, 'h3', label || '');
+      addText(title, 'span', label ? ' - 合併匯款' : '合併匯款', 'batch-remittance-label');
+
+      const items = order.batch_item_lines || batchOrders.flatMap(item => item.items);
+      addPriceBreakdown(card, items, order.batch_shipping_fee_ntd, order.batch_total_ntd);
+
+      const details = document.createElement('details');
+      addText(details, 'summary', '查看訂單編號');
+      for (const id of ids) {
+        const statusLabel = lineOrderStatuses.get(states[id]);
+        addText(details, 'p', id + (!label && statusLabel ? ' · ' + statusLabel : ''));
+      }
+      card.append(details);
+      return card;
+    }
+
     async function showOrders() {
       if (!lineToken || ordersButton.disabled) return;
       ordersPanel.hidden = false;
@@ -518,6 +551,13 @@
         }
         if (!response.ok) throw new Error('orders unavailable');
         const rows = await response.json();
+        const batches = new Map();
+        for (const order of rows) {
+          if (!order.batch_id) continue;
+          if (!batches.has(order.batch_id)) batches.set(order.batch_id, []);
+          batches.get(order.batch_id).push(order);
+        }
+        const renderedBatches = new Set();
         const selected = new Map();
         const updateCardViews = new Map();
         const eligible = rows.filter(order => order.status === 'pending_payment' && !order.remittance_reported);
@@ -529,21 +569,22 @@
         const batchForm = document.createElement('div');
         batchPayment.append(batchForm);
         for (const order of rows) {
+          if (batches.has(order.batch_id)) {
+            if (!renderedBatches.has(order.batch_id)) {
+              orderList.append(renderBatch(batches.get(order.batch_id)));
+              renderedBatches.add(order.batch_id);
+            }
+            continue;
+          }
           const card = document.createElement('article');
-          const items = order.items.map(item => item.name + ' × ' + item.quantity).join('、');
           const pending = order.status === 'pending_payment';
           const label = pending && order.remittance_reported ? '待核對匯款' :
             (lineOrderStatuses.get(order.status) || '處理中');
           addText(card, 'h3', label);
           const details = document.createElement('div');
           card.append(details);
-          addText(details, 'p', items);
-          if (order.batch_id) {
-            addText(details, 'p', '本筆商品金額：' + currency.format(order.subtotal_ntd));
-            addText(details, 'p', '合併付款整批總額：' + currency.format(order.batch_total_ntd));
-          } else {
-            addText(details, 'p', '含運總額：' + currency.format(order.total_ntd));
-          }
+          const shipping = order.shipping_fee_ntd ?? (order.total_ntd - order.subtotal_ntd);
+          addPriceBreakdown(details, order.items, shipping, order.total_ntd);
           addText(details, 'p', '訂單編號：' + order.id);
           if (pending && !order.remittance_reported) {
             addRemittanceForm(details, order);
@@ -582,7 +623,7 @@
                 const subtotal = chosen.reduce((sum, item) => sum + item.subtotal_ntd, 0);
                 const total = subtotal + combinedShippingFee;
                 for (const item of chosen) updateCardViews.get(item.id)(true);
-                addCombinedBreakdown(batchForm, chosen, subtotal, total);
+                addCombinedBreakdown(batchForm, chosen, total);
                 addRemittanceForm(batchForm, { order_ids: chosen.map(item => item.id), total_ntd: total });
               });
             }
