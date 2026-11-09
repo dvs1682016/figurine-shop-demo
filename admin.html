@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>公仔店訂單管理｜V1.15.5</title>
+  <title>公仔店訂單管理｜V1.15.7</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
@@ -67,10 +67,10 @@
       <div id="orders" aria-label="訂單清單"></div>
     </section>
     <p id="message" role="status"></p>
-    <footer>LINE 公仔銷售平台 V1.15.5 · 訂單管理</footer>
+    <footer>LINE 公仔銷售平台 V1.15.7 · 訂單管理</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.15.5
+    // LINE 公仔銷售平台 V1.15.7
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
 
@@ -259,30 +259,25 @@
       article.append(card);
       addText(card, 'h2', '待核對匯款 - 合併匯款');
 
-      const destination = order => JSON.stringify([
-        order.customer_name, order.customer_phone, order.shipping_address
-      ]);
-      const sameDestination = batchOrders.length === batch.order_ids.length &&
-        batchOrders.every(order => destination(order) === destination(first));
-      if (sameDestination) {
-        addText(card, 'p', '收件人 ' + first.customer_name + ' · ' + first.customer_phone);
-        addText(card, 'p', '收件地址 ' + first.shipping_address);
+      const deliveries = new Map();
+      for (const order of batchOrders) {
+        const recipient = order.customer_name + ' · ' + order.customer_phone;
+        const address = order.shipping_address;
+        const key = JSON.stringify([recipient, address]);
+        if (!deliveries.has(key)) deliveries.set(key, { recipient, address, times: new Set() });
+        deliveries.get(key).times.add(orderTime.format(new Date(order.created_at)));
       }
+      for (const { recipient, address, times } of deliveries.values()) {
+        const delivery = document.createElement('div');
+        addText(delivery, 'p', '下單時間：' + [...times].join('、'));
+        addText(delivery, 'p', '收件人：' + recipient);
+        addText(delivery, 'p', '收件地址：' + address);
+        card.append(delivery);
+      }
+
       addBatchBreakdown(card, first.payment_batch_id, batch);
       addText(card, 'p', '待核對匯款 · 末五碼：' + first.remittance_last5);
       addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(first.remittance_at)));
-
-      const details = document.createElement('details');
-      addText(details, 'summary', sameDestination ? '查看各筆訂單編號' : '查看訂單編號與收件資料');
-      const rowsById = new Map(batchOrders.map(order => [order.id, order]));
-      for (const id of batch.order_ids) {
-        addText(details, 'p', '訂單編號：' + id);
-        const order = rowsById.get(id);
-        if (!sameDestination && order) {
-          addText(details, 'p', order.customer_name + ' · ' + order.customer_phone + ' · ' + order.shipping_address);
-        }
-      }
-      card.append(details);
 
       const buttons = document.createElement('div');
       buttons.className = 'actions';
