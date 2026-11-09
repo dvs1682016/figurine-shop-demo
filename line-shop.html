@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>咚咚造物局｜V1.15</title>
+  <title>咚咚造物局｜V1.15.1</title>
   <style>
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
@@ -36,6 +36,9 @@
     .remittance-form { margin-top: .75rem; padding: .75rem; background: #f4edf8; border-radius: .6rem; }
     .remittance-form label { display: grid; gap: .25rem; margin: .6rem 0; }
     .remittance-form input { min-width: 0; width: 100%; }
+    .batch-choice { display: flex; align-items: center; gap: .55rem; min-height: 2.75rem; }
+    .batch-choice input { width: 1.2rem; height: 1.2rem; flex: none; }
+    .batch-choice.is-included { color: #592d8a; font-weight: 700; }
     #line-orders article p { margin: .35rem 0; }
     footer { margin-top: 2rem; font-size: .875rem; }
   </style>
@@ -44,7 +47,7 @@
   <main>
     <header>
       <h1>咚咚造物局</h1>
-      <p>V1.15 LINE 綁定測試入口，測試訂單請勿匯款。</p>
+      <p>V1.15.1 LINE 綁定測試入口，測試訂單請勿匯款。</p>
       <p>手作公仔 · 現貨商品</p>
       <p><a href="./payment.html">付款與配送</a></p>
     </header>
@@ -102,11 +105,11 @@
       </section>
       <p id="checkout-message" role="status"></p>
     </dialog>
-    <footer>LINE 公仔銷售平台 V1.15 · 公仔商店</footer>
+    <footer>LINE 公仔銷售平台 V1.15.1 · 公仔商店</footer>
   </main>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <script>
-    // LINE 公仔銷售平台 V1.15
+    // LINE 公仔銷售平台 V1.15.1
     const LIFF_ID = '2012475448-AGVHxmxw';
     const lineStatus = document.querySelector('#line-status');
     const loginButton = document.querySelector('#line-login');
@@ -516,6 +519,7 @@
         if (!response.ok) throw new Error('orders unavailable');
         const rows = await response.json();
         const selected = new Map();
+        const updateCardViews = new Map();
         const eligible = rows.filter(order => order.status === 'pending_payment' && !order.remittance_reported);
         if (eligible.length >= 2) {
           addText(batchPayment, 'h3', '合併付款');
@@ -531,28 +535,41 @@
           const label = pending && order.remittance_reported ? '待核對匯款' :
             (lineOrderStatuses.get(order.status) || '處理中');
           addText(card, 'h3', label);
-          addText(card, 'p', items);
+          const details = document.createElement('div');
+          card.append(details);
+          addText(details, 'p', items);
           if (order.batch_id) {
-            addText(card, 'p', '本筆商品金額：' + currency.format(order.subtotal_ntd));
-            addText(card, 'p', '合併付款整批總額：' + currency.format(order.batch_total_ntd));
+            addText(details, 'p', '本筆商品金額：' + currency.format(order.subtotal_ntd));
+            addText(details, 'p', '合併付款整批總額：' + currency.format(order.batch_total_ntd));
           } else {
-            addText(card, 'p', '含運總額：' + currency.format(order.total_ntd));
+            addText(details, 'p', '含運總額：' + currency.format(order.total_ntd));
           }
-          addText(card, 'p', '訂單編號：' + order.id);
+          addText(details, 'p', '訂單編號：' + order.id);
           if (pending && !order.remittance_reported) {
-            addRemittanceForm(card, order);
+            addRemittanceForm(details, order);
             if (eligible.length >= 2) {
               const label = document.createElement('label');
+              label.className = 'batch-choice';
               const checkbox = document.createElement('input');
               checkbox.type = 'checkbox';
-              label.append(checkbox, ' 加入合併付款');
+              const choiceText = document.createElement('span');
+              const names = order.items.map(item => item.name).join('、');
+              choiceText.textContent = '加入合併付款';
+              checkbox.setAttribute('aria-label', '加入合併付款：' + names + '，訂單編號 ' + order.id);
+              label.append(checkbox, choiceText);
               card.append(label);
+              updateCardViews.set(order.id, included => {
+                details.hidden = included;
+                label.classList.toggle('is-included', included);
+                choiceText.textContent = included ? names + '｜已納入上方合併明細' : '加入合併付款';
+              });
               checkbox.addEventListener('change', () => {
                 if (checkbox.checked) selected.set(order.id, order);
                 else selected.delete(order.id);
                 const chosen = [...selected.values()];
                 summary.textContent = chosen.length ? '已選 ' + chosen.length + ' 筆訂單' : '';
                 batchForm.replaceChildren();
+                for (const update of updateCardViews.values()) update(false);
                 if (chosen.length < 2) return;
                 if (chosen.some(item => item.delivery_group !== chosen[0].delivery_group)) {
                   addText(batchForm, 'p', '收件人、手機或地址不同，請選擇收件資料相同的訂單。');
@@ -564,6 +581,7 @@
                 }
                 const subtotal = chosen.reduce((sum, item) => sum + item.subtotal_ntd, 0);
                 const total = subtotal + combinedShippingFee;
+                for (const item of chosen) updateCardViews.get(item.id)(true);
                 addCombinedBreakdown(batchForm, chosen, subtotal, total);
                 addRemittanceForm(batchForm, { order_ids: chosen.map(item => item.id), total_ntd: total });
               });
