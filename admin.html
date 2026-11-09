@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>公仔店訂單管理｜V1.15</title>
+  <title>公仔店訂單管理｜V1.15.5</title>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #fff8ee; color: #29223d; font: 18px/1.55 system-ui, sans-serif; }
@@ -67,10 +67,10 @@
       <div id="orders" aria-label="訂單清單"></div>
     </section>
     <p id="message" role="status"></p>
-    <footer>LINE 公仔銷售平台 V1.15 · 訂單管理</footer>
+    <footer>LINE 公仔銷售平台 V1.15.5 · 訂單管理</footer>
   </main>
   <script>
-    // LINE 公仔銷售平台 V1.15
+    // LINE 公仔銷售平台 V1.15.5
     const SUPABASE_URL = 'https://jzzufhnjhczqoywfxtbq.supabase.co';
     const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_Jk32-rKUSKftaPIW0iUTjg_3itM-QaM';
 
@@ -251,6 +251,84 @@
       return article;
     }
 
+    function makePendingBatchCard(batchOrders, filenames) {
+      const first = batchOrders[0];
+      const batch = first.figurine_payment_batches;
+      const article = document.createElement('article');
+      const card = document.createElement('div');
+      article.append(card);
+      addText(card, 'h2', '待核對匯款 - 合併匯款');
+
+      const destination = order => JSON.stringify([
+        order.customer_name, order.customer_phone, order.shipping_address
+      ]);
+      const sameDestination = batchOrders.length === batch.order_ids.length &&
+        batchOrders.every(order => destination(order) === destination(first));
+      if (sameDestination) {
+        addText(card, 'p', '收件人 ' + first.customer_name + ' · ' + first.customer_phone);
+        addText(card, 'p', '收件地址 ' + first.shipping_address);
+      }
+      addBatchBreakdown(card, first.payment_batch_id, batch);
+      addText(card, 'p', '待核對匯款 · 末五碼：' + first.remittance_last5);
+      addText(card, 'p', '買家填寫的匯款時間：' + orderTime.format(new Date(first.remittance_at)));
+
+      const details = document.createElement('details');
+      addText(details, 'summary', sameDestination ? '查看各筆訂單編號' : '查看訂單編號與收件資料');
+      const rowsById = new Map(batchOrders.map(order => [order.id, order]));
+      for (const id of batch.order_ids) {
+        addText(details, 'p', '訂單編號：' + id);
+        const order = rowsById.get(id);
+        if (!sameDestination && order) {
+          addText(details, 'p', order.customer_name + ' · ' + order.customer_phone + ' · ' + order.shipping_address);
+        }
+      }
+      card.append(details);
+
+      const buttons = document.createElement('div');
+      buttons.className = 'actions';
+      reportAction(buttons, first, true);
+      reportAction(buttons, first, false);
+      card.append(buttons);
+
+      const items = new Map();
+      for (const order of batchOrders) {
+        for (const item of order.order_items) items.set(item.product_sku, item);
+      }
+      if (items.size) {
+        article.className = 'order-with-photos';
+        const photos = document.createElement('div');
+        photos.className = 'order-photos';
+        photos.setAttribute('aria-label', '本批次訂購商品照片');
+        for (const item of items.values()) addPhoto(photos, item, filenames);
+        article.append(photos);
+      }
+      return article;
+    }
+
+    function renderAdminOrders(rows, filenames) {
+      const pending = new Map();
+      for (const order of rows) {
+        if (order.status !== 'pending_payment' || !order.remittance_reported_at ||
+            !order.payment_batch_id || !order.figurine_payment_batches) continue;
+        if (!pending.has(order.payment_batch_id)) pending.set(order.payment_batch_id, []);
+        pending.get(order.payment_batch_id).push(order);
+      }
+      const shownBatches = new Set();
+      const cards = [];
+      for (const order of rows) {
+        const batchId = order.payment_batch_id;
+        if (pending.has(batchId) && order.status === 'pending_payment' && order.remittance_reported_at) {
+          if (!shownBatches.has(batchId)) {
+            cards.push(makePendingBatchCard(pending.get(batchId), filenames));
+            shownBatches.add(batchId);
+          }
+        } else {
+          cards.push(makeCard(order, filenames, shownBatches));
+        }
+      }
+      orders.replaceChildren(...cards);
+    }
+
     function addBatchBreakdown(card, batchId, batch) {
       const box = document.createElement('div');
       box.className = 'batch-breakdown';
@@ -340,8 +418,7 @@
         request('/rest/v1/products?select=sku,image_filename', { token: '' }).catch(() => [])
       ]);
       const filenames = new Map(catalog.map(product => [product.sku, product.image_filename]));
-      const shownBatches = new Set();
-      orders.replaceChildren(...rows.map(order => makeCard(order, filenames, shownBatches)));
+      renderAdminOrders(rows, filenames);
       message.textContent = rows.length ? '' : '目前沒有訂單。';
     }
 
